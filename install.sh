@@ -9,6 +9,7 @@
 #   ./install.sh [model] sd       [card]    card for everyday use
 #   ./install.sh [model] stock    [card]    card to go back to Samsung's firmware
 #   ./install.sh [model] status   [card]    what is on the card now
+#   ./install.sh release                    the files for installing by hand, for a GitHub release
 #
 # [model] is c200 (Gear 360 2016) or r210 (Gear 360 2017, details in
 # docs/firmware/15_r210_port.md). Left out, it is found by itself: build does every model
@@ -44,6 +45,7 @@ set_model() {
         EXIF_MODEL=SM-R210
         EXIF_VERSION=""
         CAMERA_NAME="SM-R210 (Gear 360 2017)"
+        YEAR=2017
         # The shim loads the plugin from the card as g360r/libg360r_plugin.so: the r210 has its own
         PLUGIN=camera/out/libg360r_plugin_r210.so
     else
@@ -53,6 +55,7 @@ set_model() {
         EXIF_MODEL=SM-C200
         EXIF_VERSION=0.85
         CAMERA_NAME="SM-C200 (Gear 360 2016)"
+        YEAR=2016
         PLUGIN=camera/out/libg360r_plugin.so
     fi
     IMAGE=firmware/out/$CARD_IMAGE
@@ -237,10 +240,8 @@ build_model() {
 # The model as given on the command line, so the commands we print can be pasted as they are
 model_arg() { [ -z "$GIVEN_MODEL" ] || printf '%s ' "$GIVEN_MODEL"; }
 
-# The controller, the model's plugin and the Bluetooth side in card/g360r/, and the
-# settings (kept when the card has some). A new r210 card gets its Wi-Fi passphrase
-# here, printed for the app's manual pairing: the r210's Bluetooth side is untested.
-copy_payload() {
+# The controller, the model's plugin and the Bluetooth side in card/g360r/
+copy_software() {
     local card=$1 f
     [ -f "$SD_SRC/g360r/bin/g360rd" ] || die "no $SD_SRC yet: run ./install.sh $(model_arg)build first"
     [ -f "$PLUGIN" ] || die "no $PLUGIN yet: run ./install.sh $(model_arg)build first"
@@ -250,7 +251,15 @@ copy_payload() {
     cp "$SD_SRC/g360r/bin/g360rd" "$card/g360r/bin/g360rd"
     cp "$BLE" "$card/g360r/bin/g360r-ble"
     cp "$PLUGIN" "$card/g360r/libg360r_plugin.so"
+    for f in "$card"/g360r/*.sh; do lf "$f"; done
     step "controller, plugin and Bluetooth side copied to card/g360r/"
+}
+
+# The same and the settings (kept when the card has some). A new r210 card gets its Wi-Fi
+# passphrase here, printed in case the app's manual pairing is needed.
+copy_payload() {
+    local card=$1
+    copy_software "$card"
     local conf="$card/g360r/g360r.conf"
     if [ -f "$conf" ]; then
         step "settings kept"
@@ -267,7 +276,7 @@ copy_payload() {
             step "default settings written"
         fi
     fi
-    for f in "$conf" "$card"/g360r/*.sh; do lf "$f"; done
+    lf "$conf"
 }
 
 cmd_flash() {
@@ -290,6 +299,15 @@ cmd_flash() {
     say "Then: camera off, card back in the PC, and run ./install.sh $(model_arg)activate"
 }
 
+# The one-shot p8 script and the factory SD hook's trigger files that run it
+write_activation() {
+    mkdir -p "$1/g360r/p8_hook" "$1/g360r/log"
+    cp camera/fw/p8_invalidate.sh "$1/g360r/p8_hook/p8_invalidate.sh"
+    lf "$1/g360r/p8_hook/p8_invalidate.sh"
+    printf 'cmd.tg\n' > "$1/info.tg"
+    printf 'shell script /sdcard/g360r/p8_hook/p8_invalidate.sh\n' > "$1/cmd.tg"
+}
+
 cmd_activate() {
     local card
     card=$(card_dir "${1:-}")
@@ -299,11 +317,7 @@ cmd_activate() {
     drop "$card/$CARD_IMAGE" "$card"
     drop "$card/fwupgrade.txt" "$card"
     tidy "$card"
-    mkdir -p "$card/g360r/p8_hook" "$card/g360r/log"
-    cp camera/fw/p8_invalidate.sh "$card/g360r/p8_hook/p8_invalidate.sh"
-    lf "$card/g360r/p8_hook/p8_invalidate.sh"
-    printf 'cmd.tg\n' > "$card/info.tg"
-    printf 'shell script /sdcard/g360r/p8_hook/p8_invalidate.sh\n' > "$card/cmd.tg"
+    write_activation "$card"
     sync
     step "activation script and its trigger files written"
     say "On the camera (about a minute):"
@@ -392,6 +406,61 @@ cmd_status() {
     fi
 }
 
+# The files for the guide's steps "by hand" (docs/INSTALL.md), under the names the guide
+# links to (releases/latest/download/<name>): upload them to every GitHub release, so
+# those links never break. Both models must be built.
+RELEASE_DIR=firmware/out/release
+cmd_release() {
+    local m py dir
+    py=
+    for m in python3 python; do
+        if "$m" -c 'import sys; sys.exit(sys.version_info[0] < 3)' >/dev/null 2>&1; then py=$m; break; fi
+    done
+    [ -n "$py" ] || die "Python 3 is needed to make the zips"
+    rm -rf "$RELEASE_DIR"
+    mkdir -p "$RELEASE_DIR/files"
+    # The images go as they are, under their names on the card; only what has folders is zipped
+    for m in c200 r210; do
+        set_model "$m"
+        [ -f "$IMAGE" ] || die "no $IMAGE yet: put both stock files in firmware/stock and run ./install.sh build"
+        say "==== $CAMERA_NAME"
+        cp "$IMAGE" "$RELEASE_DIR/$CARD_IMAGE"
+        step "$CARD_IMAGE"
+        # The 2016's last step and the 2017's first, and both models' later updates: no
+        # settings in it, so copying it over a card in use keeps the camera's pairing
+        mkdir -p "$RELEASE_DIR/files/$YEAR-software"
+        copy_software "$RELEASE_DIR/files/$YEAR-software"
+    done
+    # The update only checks that the file exists: not empty, so it can be a release asset
+    printf 'Revive360: the camera only checks that this file exists.\n' > "$RELEASE_DIR/fwupgrade.txt"
+    # The default settings come with the activation, the same for both models: psk=CHANGE_ME,
+    # so every camera makes its own passphrase at its first start
+    mkdir -p "$RELEASE_DIR/files/activate/g360r"
+    write_activation "$RELEASE_DIR/files/activate"
+    cp "$SD_SRC/g360r/g360r.conf.example" "$RELEASE_DIR/files/activate/g360r/g360r.conf"
+    lf "$RELEASE_DIR/files/activate/g360r/g360r.conf"
+    for dir in "$RELEASE_DIR"/files/*; do
+        "$py" -I - "$dir" "$RELEASE_DIR/Revive360-${dir##*/}.zip" <<'EOF'
+import os, sys, zipfile
+src, out = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+    for root, dirs, files in os.walk(src):
+        dirs.sort()
+        rel = os.path.relpath(root, src).replace(os.sep, "/")
+        if rel != "." and not files and not dirs:
+            z.writestr(rel + "/", "")
+        for f in sorted(files):
+            name = f if rel == "." else rel + "/" + f
+            z.write(os.path.join(root, f), name)
+EOF
+    done
+    rm -rf "$RELEASE_DIR/files"
+    (cd "$RELEASE_DIR" && sha256sum smc200.bin smr210.bin fwupgrade.txt Revive360-*.zip > SHA256SUMS.txt)
+    say "In $RELEASE_DIR:"
+    ls -l "$RELEASE_DIR" | sed 1d | sed 's/^/  /'
+    say "Upload them to the release: gh release upload <tag> $RELEASE_DIR/* --clobber"
+}
+
 CMD=${1:-}
 [ $# -gt 0 ] && shift
 case "$CMD" in
@@ -401,5 +470,6 @@ case "$CMD" in
     sd) cmd_sd "$@" ;;
     stock) cmd_stock "$@" ;;
     status) cmd_status "$@" ;;
+    release) cmd_release ;;
     *) sed -n '2,/^set /p' "$0" | grep '^#' | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

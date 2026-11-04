@@ -39,7 +39,7 @@ g360r.conf
 *.keystore
 /keystore.properties
 
-# Samsung's firmware images: kept locally in firmware/, never published
+# Samsung's firmware images: kept locally in firmware/, never committed
 /firmware/*
 !/firmware/README.md
 

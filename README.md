@@ -47,39 +47,29 @@ phone app plus a small add-on for the camera, and the camera does everything it 
   There is nothing to type.
 - **Private**: the phone talks straight to the camera. Nothing goes to the internet.
 - **Saves the battery**: the camera's Wi-Fi is on only while the app needs it.
-- **Can be undone**: one command puts Samsung's original software back on the camera.
+- **Can be undone**: Samsung's original software goes back on the camera the same way.
 
 ## Which cameras
 
 | Camera | Works? |
 |---|---|
-| Gear 360 (2016, SM-C200) with firmware C200GLU0AQK1 | Yes |
-| Gear 360 (2016) with an older firmware | Yes, after updating it to C200GLU0AQK1 first |
-| Gear 360 (2017, SM-R210) with firmware R210GLU0ARB2 | Yes |
-| Gear 360 (2017) with an older firmware | Yes, after updating it to R210GLU0ARB2 first |
+| Gear 360 (2016, SM-C200) | Yes |
+| Gear 360 (2017, SM-R210) | Yes |
 
-Only the last firmware Samsung released for each camera is supported. If your camera has an
-older one, update it to the last one first: the [install guide](docs/INSTALL.md#what-you-need)
-says how.
+Any firmware: installing ours also updates the camera to Samsung's last one.
 
 ## How to get started
 
 Setting it up takes about half an hour, once. You need the camera, its microSD card, an Android
-phone and a computer.
+phone and a computer with a card reader.
 
 1. **Get the app** from [Google Play](https://play.google.com/store/apps/details?id=com.simoneluconi.revive360), or download the APK from the
    [latest GitHub release](https://github.com/simoneluconi/Revive360/releases/latest).
-2. **Set up the camera**: the same commands for the 2016 and the 2017 (the script recognises the
-   camera), each one telling you what to do next on the camera:
-
-```sh
-./install.sh build      # prepare everything on the computer
-./install.sh flash      # update the camera
-./install.sh activate   # switch the update on
-./install.sh sd         # get the camera ready (2016 only), then pair it in the app
-```
-
-The step-by-step guide: **[docs/INSTALL.md](docs/INSTALL.md)**.
+2. **Set up the camera**: download a few files from the
+   [latest release](https://github.com/simoneluconi/Revive360/releases/latest), copy them to the
+   camera's card and switch it on, in two or three short steps. The
+   **[install guide](docs/INSTALL.md)** says which files and when (or how to build them yourself
+   with one script).
 
 > Changing the camera's software is at your own risk. Samsung's original software can always be
 > put back in the same way: the guide explains how.
@@ -96,8 +86,7 @@ Contributions are welcome.
 
 Free software under the [GNU GPL v3](LICENSE). Revive360 is an independent project, not
 made, affiliated with or endorsed by Samsung. Samsung and Gear 360 are trademarks of Samsung
-Electronics; they are used here only to say which camera the app works with. It
-contains no Samsung software: you download Samsung's original firmware yourself.
+Electronics; they are used here only to say which camera the app works with.
 
 The app and the website use the [Manrope](https://github.com/googlefonts/manrope) font, under the
 [SIL Open Font License 1.1](docs/manrope-OFL.txt).
