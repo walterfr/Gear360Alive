@@ -42,8 +42,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * What the app saved on the phone: 360 photos open in the 360 viewer, videos and framings in the
- * phone's own apps.
+ * What the app saved on the phone: 360 photos open in the 360 viewer, videos in the 360 Studio,
+ * and flat framings in the phone's own apps.
  */
 @Composable
 fun PhoneGallery(modifier: Modifier = Modifier) {
@@ -69,13 +69,15 @@ fun PhoneGallery(modifier: Modifier = Modifier) {
         ) {
             items(list, key = { it.uri.toString() }) { item ->
                 PhoneTile(item) {
-                    if (item.kind == FileKind.VIDEO || item.isFlat) {
+                    if (item.isFlat) {
                         runCatching {
                             context.startActivity(
-                                Intent(Intent.ACTION_VIEW).setDataAndType(item.uri, if (item.isFlat) "image/*" else "video/*")
+                                Intent(Intent.ACTION_VIEW).setDataAndType(item.uri, "image/*")
                                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
                             )
                         }
+                    } else if (item.kind == FileKind.VIDEO) {
+                        nav.navigate(Screen.PhoneVideoStudio(item))
                     } else {
                         nav.navigate(Screen.PhonePanorama(item))
                     }

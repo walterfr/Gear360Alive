@@ -40,6 +40,8 @@ data class DualFisheye(
      */
     val vignetteStrength: Float = C200_VIGNETTE_STRENGTH,
     val vignettePower: Float = C200_VIGNETTE_POWER,
+    /** Whether to radially inpaint the south-pole nadir (`d.y < -0.88`) to hide tripod legs. */
+    val nadirPatch: Boolean = false,
 ) {
     /** What a lens pixel at [theta] is multiplied by to undo the fall-off. */
     fun vignetteGain(theta: Float): Float =
@@ -193,6 +195,7 @@ uniform float uMaxTheta;
 uniform vec3 uGainFront;
 uniform vec3 uGainBack;
 uniform vec2 uVignette;
+uniform float uNadirPatch;
 """
 
     const val FUNCTIONS = """
@@ -216,7 +219,7 @@ float weight(float t, float width, float overlap) {
     return clamp(0.5 + t / (2.0 * min(width, overlap)), 0.0, 1.0);
 }
 
-vec3 sphereColor(vec3 d) {
+vec3 rawSphereColor(vec3 d) {
     vec2 uvF;
     vec2 uvB;
     float vF;
@@ -235,10 +238,27 @@ vec3 sphereColor(vec3 d) {
     vec3 b5 = textureLod(uBack, uvB, 5.0).rgb * gB;
     float t = mF - mB;
     float overlap = mF + mB;
-    vec3 hi = mix(b0 - b2, f0 - f2, weight(t, NARROW, overlap));
-    vec3 mid = mix(b2 - b5, f2 - f5, weight(t, MID, overlap));
-    vec3 lo = mix(b5, f5, weight(t, WIDE, overlap));
+    // Narrow seam in lower hemisphere (d.y < -0.35) for Invisible Selfie Stick cut
+    float stickFactor = mix(1.0, 0.28, smoothstep(-0.35, -0.80, d.y));
+    vec3 hi = mix(b0 - b2, f0 - f2, weight(t, NARROW * stickFactor, overlap));
+    vec3 mid = mix(b2 - b5, f2 - f5, weight(t, MID * stickFactor, overlap));
+    vec3 lo = mix(b5, f5, weight(t, WIDE * stickFactor, overlap));
     return clamp(lo + mid + hi, 0.0, 1.0);
+}
+
+vec3 sphereColor(vec3 d) {
+    vec3 baseCol = rawSphereColor(d);
+    if (uNadirPatch > 0.5 && d.y < -0.88) {
+        float ringY = -0.88;
+        float ringR = sqrt(1.0 - ringY * ringY);
+        float lenXZ = length(d.xz);
+        vec2 h = lenXZ > 1e-5 ? d.xz / lenXZ : vec2(0.0, 1.0);
+        vec3 ringD1 = vec3(h.x * ringR, ringY, h.y * ringR);
+        vec3 ringD2 = vec3(-h.x * ringR, ringY, -h.y * ringR);
+        vec3 patchCol = mix(rawSphereColor(ringD1), rawSphereColor(ringD2), smoothstep(-0.92, -0.995, d.y) * 0.5);
+        return mix(baseCol, patchCol, smoothstep(-0.88, -0.94, d.y));
+    }
+    return baseCol;
 }
 """
 }

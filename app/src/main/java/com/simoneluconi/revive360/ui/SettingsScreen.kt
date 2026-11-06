@@ -166,6 +166,12 @@ fun SettingsScreen() {
 
         SectionTitle(stringResource(R.string.settings_support))
         Card(padding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)) {
+            SettingRow(
+                title = "Firmware & SD Manager (OTG / OTA / OSC)",
+                icon = AppIcons.SdCard,
+                onClick = { nav.navigate(Screen.Firmware) },
+            )
+            Hairline()
             SettingRow(title = stringResource(R.string.log_title), icon = AppIcons.List, onClick = { nav.navigate(Screen.Log) })
         }
 

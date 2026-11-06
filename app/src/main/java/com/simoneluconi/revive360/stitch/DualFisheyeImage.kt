@@ -16,6 +16,8 @@ class DualFisheyeImage(
     val back: Bitmap,
     /** Front r, g, b then back r, g, b (see [LensGains]). */
     val gains: FloatArray,
+    /** Factory optical calibration extracted from the file's OPAX MakerNote (or model default). */
+    var model: DualFisheye = DualFisheye(),
 ) : Panorama {
     val side: Int get() = front.height
 
@@ -27,6 +29,7 @@ class DualFisheyeImage(
     companion object {
         /** [maxSide]: the largest texture the GPU takes; bigger halves are decoded at half size. */
         fun load(file: File, model: DualFisheye, maxSide: Int = Int.MAX_VALUE): DualFisheyeImage {
+            val calibrated = CameraMetadata.readCalibration(file, model)
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(file.path, bounds)
             val width = bounds.outWidth
@@ -46,11 +49,11 @@ class DualFisheyeImage(
                 val back = decoder.decodeRegion(Rect(height, 0, width, height), options)
                 val preview = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = 8 })
                 val gains = try {
-                    LensGains.estimate(preview, model)
+                    LensGains.estimate(preview, calibrated)
                 } finally {
                     preview.recycle()
                 }
-                return DualFisheyeImage(front, back, gains)
+                return DualFisheyeImage(front, back, gains, calibrated)
             } finally {
                 decoder.recycle()
             }

@@ -76,13 +76,16 @@ fun FileScreen(path: String) {
             InfoRow(stringResource(R.string.file_path), file.path, mono = true)
         }
 
-        if (file.kind == FileKind.PHOTO && (caps?.download == true)) {
+        if ((file.kind == FileKind.PHOTO || file.kind == FileKind.VIDEO) && (caps?.download == true)) {
             PillButton(
                 stringResource(R.string.pano_open),
                 Modifier.fillMaxWidth(),
                 icon = AppIcons.Sphere,
                 enabled = info != null,
-            ) { nav.navigate(Screen.Panorama(file.path)) }
+            ) {
+                if (file.kind == FileKind.VIDEO) nav.navigate(Screen.VideoStudio(file.path))
+                else nav.navigate(Screen.Panorama(file.path))
+            }
         }
 
         val progress = downloads[file.path]

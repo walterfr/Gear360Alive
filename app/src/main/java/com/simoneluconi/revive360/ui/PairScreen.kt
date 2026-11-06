@@ -185,6 +185,7 @@ fun PairScreen(replaceId: String? = null) {
 /** Which cameras work and what each one needs, before the user looks for one ([CameraModels]). */
 @Composable
 private fun BeforeYouStart() {
+    val nav = LocalActions.current
     val colors = LocalAppColors.current
     val uri = LocalUriHandler.current
     Card {
@@ -201,7 +202,12 @@ private fun BeforeYouStart() {
             Label(stringResource(need), size = 14.sp, color = colors.text2)
         }
         Spacer(Modifier.height(14.dp))
-        PillButton(stringResource(R.string.models_guide)) { uri.openUri(CameraModels.INSTALL_GUIDE) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PillButton(stringResource(R.string.models_guide)) { uri.openUri(CameraModels.INSTALL_GUIDE) }
+            PillButton("Firmware & SD Manager", icon = AppIcons.SdCard, style = ButtonStyle.PRIMARY) {
+                nav.navigate(Screen.Firmware)
+            }
+        }
     }
 }
 

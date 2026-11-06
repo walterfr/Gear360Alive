@@ -16,6 +16,7 @@ class SphereBinding(private val program: Int) {
     private val gainFront = GLES30.glGetUniformLocation(program, "uGainFront")
     private val gainBack = GLES30.glGetUniformLocation(program, "uGainBack")
     private val vignette = GLES30.glGetUniformLocation(program, "uVignette")
+    private val nadirPatch = GLES30.glGetUniformLocation(program, "uNadirPatch")
 
     /** With [program] in use. */
     fun bind(model: DualFisheye, frontTexture: Int, backTexture: Int, gains: FloatArray) {
@@ -32,6 +33,9 @@ class SphereBinding(private val program: Int) {
         GLES30.glUniform3f(gainFront, gains[0], gains[1], gains[2])
         GLES30.glUniform3f(gainBack, gains[3], gains[4], gains[5])
         GLES30.glUniform2f(vignette, model.vignetteStrength, model.vignettePower)
+        if (nadirPatch >= 0) {
+            GLES30.glUniform1f(nadirPatch, if (model.nadirPatch) 1f else 0f)
+        }
     }
 }
 

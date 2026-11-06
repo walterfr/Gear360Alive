@@ -5,17 +5,19 @@ import android.media.MediaFormat
 import android.os.Build
 import android.os.SystemClock
 import android.view.Surface
+import com.simoneluconi.revive360.stitch.CameraMetadata
+import com.simoneluconi.revive360.stitch.GyroSample
 import java.io.DataInputStream
 import java.io.EOFException
 import java.io.InputStream
 import java.nio.ByteBuffer
 
 /**
- * Plays the camera's live view (protocol §5.14) onto a [Surface]. The C200 sends Samsung's TTTS
+ * Plays the camera's live view (protocol §5.14) onto a [Surface]. The C200/R210 send Samsung's TTTS
  * stream: a header (`TTTS`, `VID0` with the size, `AUD0`, then `LIST`/`movi`), then chunks of
  * `id(4) size(4, big-endian) timestamp(8) data(size)`; video chunks (`00VD`) hold one HEVC access
- * unit in Annex B form, the first with its VPS/SPS/PPS. Each frame is shown as soon as it decodes:
- * a preview, not a recording.
+ * unit in Annex B form, the first with its VPS/SPS/PPS; gyro chunks (`00VR`) hold 3 rational pairs
+ * `(pitch, roll, yaw)` in degrees. Each frame is shown as soon as it decodes: a preview, not a recording.
  *
  * [run] blocks reading the stream; closing the stream ends it.
  */
@@ -24,6 +26,10 @@ class LiveViewDecoder(
     private val surface: Surface,
     /** The picture size, once known (from the stream header) */
     private val onSize: (Int, Int) -> Unit,
+    /** Real-time 3-axis gyroscope sample (`00VR` chunk) for FlowState horizon lock */
+    private val onGyro: (GyroSample) -> Unit = {},
+    /** Raw Annex-B HEVC access unit callback (`00VD` chunk) for OBS/VLC network relay */
+    private val onAccessUnit: (ByteArray) -> Unit = {},
     /** Frames shown so far */
     private val onFrame: (Long) -> Unit,
 ) {
@@ -46,8 +52,12 @@ class LiveViewDecoder(
                 val timestamp = data.readLong()
                 if (size < 0 || size > MAX_CHUNK) throw IllegalStateException("chunk of $size bytes")
                 val payload = ByteArray(size).also { data.readFully(it) }
-                if (String(id, Charsets.US_ASCII) == VIDEO_CHUNK && !behind(payload, timestamp)) {
-                    video(payload, timestamp, width, height)
+                when (String(id, Charsets.US_ASCII)) {
+                    VIDEO_CHUNK -> {
+                        onAccessUnit(payload)
+                        if (!behind(payload, timestamp)) video(payload, timestamp, width, height)
+                    }
+                    GYRO_CHUNK -> CameraMetadata.parseLiveVrotChunk(payload, timestamp)?.let(onGyro)
                 }
             }
         } finally {
@@ -137,6 +147,7 @@ class LiveViewDecoder(
 
     companion object {
         private const val VIDEO_CHUNK = "00VD"
+        private const val GYRO_CHUNK = "00VR"
         /** The stream's clock: 120 kHz (its VID0/AUD0 timescale) */
         private const val TIMESCALE = 120_000L
         private const val HEADER_MAX = 4096

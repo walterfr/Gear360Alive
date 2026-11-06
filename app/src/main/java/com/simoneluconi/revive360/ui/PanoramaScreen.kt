@@ -1,7 +1,12 @@
 package com.simoneluconi.revive360.ui
 
+import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +54,7 @@ import com.simoneluconi.revive360.protocol.FileKind
 import com.simoneluconi.revive360.stitch.DualFisheye
 import com.simoneluconi.revive360.stitch.DualFisheyeImage
 import com.simoneluconi.revive360.stitch.EquirectImage
+import com.simoneluconi.revive360.stitch.ExposureFusion
 import com.simoneluconi.revive360.stitch.Panorama
 import com.simoneluconi.revive360.stitch.PanoramaEdit
 import com.simoneluconi.revive360.stitch.PanoramaEdits
@@ -122,11 +128,15 @@ private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String) {
     val key = source?.key
     var fetched by remember { mutableFloatStateOf(-1f) }
     var original by remember { mutableStateOf<File?>(null) }
+    var baseDualPicture by remember { mutableStateOf<DualFisheyeImage?>(null) }
+    var hdrDualPicture by remember { mutableStateOf<DualFisheyeImage?>(null) }
     var picture by remember { mutableStateOf<Panorama?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
     var saving by remember { mutableStateOf(false) }
     var full by rememberSaveable { mutableStateOf(false) }
+    var nadirPatch by rememberSaveable { mutableStateOf(false) }
+    var pureShotHdr by rememberSaveable { mutableStateOf(false) }
     // What the picture keeps: its corrections, its framing, and which of the two it was last
     var edit by remember(key) { mutableStateOf(key?.let { edits.get(it) } ?: PanoramaEdit()) }
     var framing by remember(key) {
@@ -209,8 +219,67 @@ private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String) {
         systemBars(view, show = !full)
         onDispose { systemBars(view, show = true) }
     }
-    // Leaving keeps the framing as it was left
-    DisposableEffect(key) { onDispose { keepFraming() } }
+    // Leaving keeps the framing as it was left and recycles cached bitmaps
+    DisposableEffect(key) {
+        onDispose {
+            keepFraming()
+            runCatching { hdrDualPicture?.recycle() }
+            runCatching { baseDualPicture?.recycle() }
+            runCatching { (picture as? EquirectImage)?.bitmap?.recycle() }
+        }
+    }
+
+    val starlapsePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        val base = baseDualPicture ?: (picture as? DualFisheyeImage) ?: return@rememberLauncherForActivityResult
+        if (uris.isEmpty() || saving) return@rememberLauncherForActivityResult
+        saving = true
+        scope.launch {
+            try {
+                val stacked = withContext(Dispatchers.Default) {
+                    val side = base.side
+                    val frontAcc = IntArray(side * side).also { base.front.getPixels(it, 0, side, 0, 0, side, side) }
+                    val backAcc = IntArray(side * side).also { base.back.getPixels(it, 0, side, 0, 0, side, side) }
+                    val nextBuf = IntArray(side * side)
+                    for ((idx, uri) in uris.withIndex()) {
+                        val tmp = File(context.cacheDir, "starlapse_in_$idx.jpg")
+                        try {
+                            context.contentResolver.openInputStream(uri)?.use { inp ->
+                                tmp.outputStream().use { out -> inp.copyTo(out) }
+                            }
+                            val df = DualFisheyeImage.load(tmp, base.model, side)
+                            try {
+                                val fScaled = if (df.front.width != side) Bitmap.createScaledBitmap(df.front, side, side, true) else df.front
+                                fScaled.getPixels(nextBuf, 0, side, 0, 0, side, side)
+                                if (fScaled !== df.front) fScaled.recycle()
+                                ExposureFusion.accumulateStarlapseMaxLightInPlace(frontAcc, nextBuf)
+
+                                val bScaled = if (df.back.width != side) Bitmap.createScaledBitmap(df.back, side, side, true) else df.back
+                                bScaled.getPixels(nextBuf, 0, side, 0, 0, side, side)
+                                if (bScaled !== df.back) bScaled.recycle()
+                                ExposureFusion.accumulateStarlapseMaxLightInPlace(backAcc, nextBuf)
+                            } finally {
+                                df.recycle()
+                            }
+                        } finally {
+                            tmp.delete()
+                        }
+                    }
+                    val fOut = Bitmap.createBitmap(frontAcc, side, side, Bitmap.Config.ARGB_8888)
+                    val bOut = Bitmap.createBitmap(backAcc, side, side, Bitmap.Config.ARGB_8888)
+                    DualFisheyeImage(fOut, bOut, base.gains, base.model.copy(nadirPatch = nadirPatch))
+                }
+                hdrDualPicture?.takeIf { it !== picture }?.recycle()
+                hdrDualPicture = stacked
+                pureShotHdr = true
+                picture = stacked
+                nav.message("Starlapse Max-Light stacked (+${uris.size} frames)", MessageKind.GOOD)
+            } catch (e: Exception) {
+                nav.message("Starlapse stack failed: ${e.message}", MessageKind.BAD)
+            } finally {
+                saving = false
+            }
+        }
+    }
     LaunchedEffect(source, attempt) {
         val target = source ?: return@LaunchedEffect
         if (picture != null) return@LaunchedEffect
@@ -219,9 +288,17 @@ private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String) {
             val local = target.fetch { fetched = it }
             original = local
             fetched = 1f
-            picture = withContext(Dispatchers.Default) {
-                if (target.stitched) EquirectImage.load(local, MAX_SIDE) else DualFisheyeImage.load(local, model, MAX_SIDE)
+            val loaded = withContext(Dispatchers.Default) {
+                if (target.stitched) {
+                    EquirectImage.load(local, MAX_SIDE)
+                } else {
+                    DualFisheyeImage.load(local, model.copy(nadirPatch = nadirPatch), MAX_SIDE)
+                }
             }
+            if (loaded is DualFisheyeImage) {
+                baseDualPicture = loaded
+            }
+            picture = loaded
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -334,9 +411,61 @@ private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String) {
 
         // What to make of it: a 360 photo, or an ordinary one framed out of the sphere
         if (source?.stitched != true) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Chip(stringResource(R.string.pano_kind_360), selected = !flat) { showFlat(false) }
                 Chip(stringResource(R.string.pano_kind_flat), selected = flat) { showFlat(true) }
+                Chip("Nadir Patch", selected = nadirPatch) {
+                    nadirPatch = !nadirPatch
+                    baseDualPicture?.let { it.model = it.model.copy(nadirPatch = nadirPatch) }
+                    hdrDualPicture?.let { it.model = it.model.copy(nadirPatch = nadirPatch) }
+                    (picture as? DualFisheyeImage)?.let { df ->
+                        df.model = df.model.copy(nadirPatch = nadirPatch)
+                    }
+                    panorama?.requestRender()
+                }
+                Chip("PureShot HDR", selected = pureShotHdr) {
+                    val base = baseDualPicture ?: (picture as? DualFisheyeImage) ?: return@Chip
+                    if (saving) return@Chip
+                    val nextHdr = !pureShotHdr
+                    pureShotHdr = nextHdr
+                    if (!nextHdr) {
+                        base.model = base.model.copy(nadirPatch = nadirPatch)
+                        picture = base
+                    } else {
+                        val cached = hdrDualPicture
+                        if (cached != null) {
+                            cached.model = cached.model.copy(nadirPatch = nadirPatch)
+                            picture = cached
+                        } else {
+                            saving = true
+                            scope.launch {
+                                try {
+                                    val fused = withContext(Dispatchers.Default) {
+                                        ExposureFusion.enhanceDualFisheyePureShot(base).also {
+                                            it.model = base.model.copy(nadirPatch = nadirPatch)
+                                        }
+                                    }
+                                    hdrDualPicture = fused
+                                    picture = fused
+                                    nav.message("PureShot Mertens HDR (Full Res) applied", MessageKind.GOOD)
+                                } catch (e: Exception) {
+                                    pureShotHdr = false
+                                    nav.message("PureShot failed: ${e.message}", MessageKind.BAD)
+                                } finally {
+                                    saving = false
+                                }
+                            }
+                        }
+                    }
+                }
+                Chip("Starlapse Stack", selected = false) {
+                    if (!saving && picture is DualFisheyeImage) {
+                        starlapsePicker.launch("image/*")
+                    }
+                }
             }
         }
 
@@ -399,7 +528,7 @@ private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String) {
                     val from = source ?: return@PillButton
                     val e = edit
                     save("360 photo") {
-                        val stitched = Stitcher.equirect(image, model, image.side * 2, e.exportOrientation())
+                        val stitched = Stitcher.equirect(image, image.model, image.side * 2, e.exportOrientation())
                         try {
                             publish("${from.baseName}${PhoneItem.STITCHED_SUFFIX}.jpg") {
                                 // Our pitch looks down when positive, the metadata's up
@@ -467,7 +596,8 @@ private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String) {
                     val (w, h) = frameSize(image, v, window)
                     val stamp = java.text.SimpleDateFormat("HHmmss", java.util.Locale.ROOT).format(java.util.Date())
                     save("Framing ${w}x$h") {
-                        val picked = ViewRenderer.render(image, model, v, w, h, window)
+                        val calibratedModel = (image as? DualFisheyeImage)?.model ?: model
+                        val picked = ViewRenderer.render(image, calibratedModel, v, w, h, window)
                         try {
                             publish("${from.baseName}_${mode.fileTag}_$stamp.jpg") { Jpeg360.writeFlat(picked, local, it) }
                         } finally {

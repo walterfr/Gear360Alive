@@ -108,7 +108,7 @@ class ViewRenderer(private val model: DualFisheye) {
         val program = when (picture) {
             is DualFisheyeImage -> dual?.also {
                 GLES30.glUseProgram(it.id)
-                binding?.bind(model, tex[0], tex[1], picture.gains)
+                binding?.bind(picture.model, tex[0], tex[1], picture.gains)
             }
             is EquirectImage -> equirect?.also {
                 GLES30.glUseProgram(it.id)

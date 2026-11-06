@@ -72,11 +72,19 @@ import com.simoneluconi.revive360.protocol.SettingValues
 import com.simoneluconi.revive360.protocol.ShootingModes
 import com.simoneluconi.revive360.protocol.Storage
 import com.simoneluconi.revive360.settings.PairedCamera
+import com.simoneluconi.revive360.media.MediaSaver
+import com.simoneluconi.revive360.stitch.DualFisheye
+import com.simoneluconi.revive360.stitch.ExposureFusion
+import com.simoneluconi.revive360.stitch.Jpeg360
+import com.simoneluconi.revive360.stitch.Stitcher
 import com.simoneluconi.revive360.ui.theme.LocalAppColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * The paired cameras, one card each, also with a single one. A tap on the connected camera opens its
@@ -597,14 +605,18 @@ private fun CaptureBar(info: CameraInfo, shot: ShotChoice, changer: SettingChang
 /** The scrolling part: the settings of the shooting mode and the last shot. */
 @Composable
 private fun CaptureCard(info: CameraInfo, shot: ShotChoice, changer: SettingChanger) {
-    val controller = LocalActions.current.app.controller
+    val nav = LocalActions.current
+    val controller = nav.app.controller
+    val context = LocalContext.current
     val colors = LocalAppColors.current
     val resources = LocalResources.current
+    val scope = rememberCoroutineScope()
     val last by controller.lastCapture.collectAsStateWithLifecycle()
     val v = captureView(info, changer)
     val caps = v.caps
     val mode = shot.mode(caps)
     val quality = shot.quality(caps)
+    var bracketing by remember { mutableStateOf(false) }
 
     Card {
         Label(stringResource(R.string.capture_title), size = 13.sp, color = colors.text2, weight = FontWeight.Bold)
@@ -623,6 +635,66 @@ private fun CaptureCard(info: CameraInfo, shot: ShotChoice, changer: SettingChan
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 caps.photoQualities.forEach { q ->
                     Chip(Format.quality(resources, q), selected = q == quality) { shot.quality = q }
+                }
+            }
+        }
+        val evDef = caps.setting(SettingIds.EV)
+        if (!v.recordMode && evDef != null && evDef.values.size >= 3) {
+            Spacer(Modifier.height(10.dp))
+            PillButton(
+                if (bracketing) "Capturing & Fusing 3-EV PureShot…" else "PureShot HDR (3× EV Bracket)",
+                Modifier.fillMaxWidth(),
+                icon = AppIcons.Sphere,
+                enabled = !v.busy && !bracketing,
+            ) {
+                val values = evDef.values
+                val midIdx = values.size / 2
+                val lowEv = values[(midIdx - 2).coerceAtLeast(0)]
+                val midEv = values[midIdx]
+                val highEv = values[(midIdx + 2).coerceAtMost(values.lastIndex)]
+                val origEv = v.settings?.values?.get(SettingIds.EV) ?: midEv
+                bracketing = true
+                scope.launch {
+                    val downloaded = mutableListOf<File>()
+                    try {
+                        for (ev in listOf(lowEv, midEv, highEv)) {
+                            controller.setSetting(SettingIds.EV, ev)
+                            val res = controller.capture(CaptureMode.PHOTO, quality)
+                            val photo = res.files.firstOrNull { it.kind == FileKind.PHOTO } ?: res.files.first()
+                            downloaded += controller.original(photo) { _, _ -> }
+                        }
+                        runCatching { controller.setSetting(SettingIds.EV, origEv) }
+                        val savedName = withContext(Dispatchers.Default) {
+                            val fused = ExposureFusion.fuseDualFisheyeBracketFiles(downloaded, DualFisheye())
+                            val stitched = Stitcher.equirect(fused, fused.model, fused.side * 2)
+                            val outName = "${downloaded[1].nameWithoutExtension}_pureshot_360.jpg"
+                            val tmpOut = File(context.cacheDir, outName)
+                            try {
+                                Jpeg360.write(stitched, downloaded[1], tmpOut, 0f)
+                                MediaSaver.publish(
+                                    context,
+                                    outName,
+                                    FileKind.PHOTO,
+                                    "image/jpeg",
+                                    System.currentTimeMillis() / 1000L,
+                                    tmpOut,
+                                )
+                                outName
+                            } finally {
+                                stitched.recycle()
+                                fused.recycle()
+                                tmpOut.delete()
+                            }
+                        }
+                        nav.message("PureShot 3-EV saved: $savedName", MessageKind.GOOD)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        runCatching { controller.setSetting(SettingIds.EV, origEv) }
+                        nav.message(Format.error(resources, e), MessageKind.BAD)
+                    } finally {
+                        bracketing = false
+                    }
                 }
             }
         }
