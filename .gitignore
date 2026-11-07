@@ -53,3 +53,6 @@ CLAUDE.local.md
 
 # Python bytecode
 __pycache__/
+
+# Camera samples: private and large
+/100PHOTO/

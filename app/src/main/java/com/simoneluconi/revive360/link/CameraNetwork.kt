@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.PatternMatcher
 import com.simoneluconi.revive360.EventLog
 import com.simoneluconi.revive360.protocol.Protocol
+import com.simoneluconi.revive360.protocol.StockClient
 import com.simoneluconi.revive360.settings.PairedCamera
 import java.net.Inet4Address
 
@@ -49,6 +50,20 @@ class CameraNetwork(context: Context) {
             camera.bssid?.let { runCatching { setBssid(MacAddress.fromString(it)) } }
             setWpa2Passphrase(camera.passphrase)
         }.build()
+        request(specifier, camera.ssid ?: "${Protocol.SSID_PREFIX}*", camera.bssid, listener)
+    }
+
+    /** A camera on its original firmware: its network, started from its menu. The system asks each time. */
+    fun requestStock(passphrase: String, listener: Listener) {
+        release()
+        val specifier = WifiNetworkSpecifier.Builder()
+            .setSsidPattern(PatternMatcher(StockClient.SSID_PREFIX, PatternMatcher.PATTERN_PREFIX))
+            .setWpa2Passphrase(passphrase)
+            .build()
+        request(specifier, "${StockClient.SSID_PREFIX}*", null, listener)
+    }
+
+    private fun request(specifier: WifiNetworkSpecifier, target: String, bssid: String?, listener: Listener) {
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             // The camera has no internet: without this the request would wait for a validated network
@@ -84,8 +99,7 @@ class CameraNetwork(context: Context) {
             }
         }
         callback = cb
-        val target = camera.ssid ?: "${Protocol.SSID_PREFIX}*"
-        EventLog.log("Wi-Fi: asking for $target${if (camera.bssid != null) " (${camera.bssid})" else ""}")
+        EventLog.log("Wi-Fi: asking for $target${if (bssid != null) " ($bssid)" else ""}")
         connectivity.requestNetwork(request, cb)
     }
 

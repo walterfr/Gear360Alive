@@ -1,6 +1,8 @@
 package com.simoneluconi.revive360.ui
 
+import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -69,7 +71,7 @@ fun PhoneGallery(modifier: Modifier = Modifier) {
         ) {
             items(list, key = { it.uri.toString() }) { item ->
                 PhoneTile(item) {
-                    if (item.isFlat) {
+                    if (item.isFlat || isOneLensPhoto(context, item)) {
                         runCatching {
                             context.startActivity(
                                 Intent(Intent.ACTION_VIEW).setDataAndType(item.uri, "image/*")
@@ -85,6 +87,14 @@ fun PhoneGallery(modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+/** A camera photo that is not 2:1 used one lens (`SAM_0299.JPG`, 2304x1296): the 360 viewer can't open it. */
+private fun isOneLensPhoto(context: Context, item: PhoneItem): Boolean {
+    if (item.kind != FileKind.PHOTO) return false
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    runCatching { context.contentResolver.openInputStream(item.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } }
+    return bounds.outWidth > 0 && bounds.outWidth != bounds.outHeight * 2
 }
 
 @Composable

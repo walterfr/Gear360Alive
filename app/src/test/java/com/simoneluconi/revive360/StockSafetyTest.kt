@@ -19,6 +19,8 @@ class StockSafetyTest {
         "FirmwareScreen",
         "Screen.Firmware",
         "INSTALL_GUIDE",
+        "X_SetFormat",
+        "X_SetReset",
     )
 
     @Test

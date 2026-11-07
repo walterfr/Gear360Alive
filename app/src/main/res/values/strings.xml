@@ -10,8 +10,8 @@
     <string name="camera_generic">Gear 360</string>
 
     <!-- Home -->
-    <string name="welcome_title">Camera connection is coming</string>
-    <string name="welcome_text">Gear360 Alive is being built for the Gear 360 (2017) on its original firmware, without changing the camera. It cannot connect to a camera yet.</string>
+    <string name="welcome_title">Your Gear 360, on its original firmware</string>
+    <string name="welcome_text">Gear360 Alive does not change the camera. For now it reads the camera\'s status and works with the files you import. Shooting from the app is still being built.</string>
     <string name="welcome_action">Set up the camera</string>
     <string name="adapter_not_supported">This camera is not fully supported yet (%1$s): only what it reports is shown.</string>
     <string name="status_battery">Battery</string>
@@ -303,4 +303,24 @@
     <string name="export_beyond_decoder">This device declares less than this video needs. The export may fail; the original stays safe.</string>
     <string name="export_reduced">This device will export at %1$dx%2$d.</string>
     <string name="export_slow">This export will take longer than the video.</string>
+
+    <!-- Camera on its original firmware -->
+    <string name="stock_open">See the camera\'s status</string>
+    <string name="stock_title">Camera</string>
+    <string name="stock_steps">On the camera, hold Menu until a Connect to option appears, press Menu until it shows Connect to iOS, and confirm with the shutter button. Then type the code shown on its screen. You only type it once.</string>
+    <string name="stock_code">Code on the camera\'s screen</string>
+    <string name="stock_connect">Connect</string>
+    <string name="stock_joining">Connecting…</string>
+    <string name="stock_lost">The camera\'s Wi-Fi went off. It may have switched itself off: start it again from its menu.</string>
+    <string name="stock_not_found">Camera network not found. Check it is on, and that the code is right.</string>
+    <string name="stock_reading">Reading the camera…</string>
+    <string name="stock_no_answer">The camera is not answering.</string>
+    <string name="stock_battery">Battery</string>
+    <string name="stock_charging">%1$s, charging</string>
+    <string name="stock_card">SD card</string>
+    <string name="stock_card_free">%1$.1f GB free of %2$.1f GB</string>
+    <string name="stock_mode">Mode</string>
+    <string name="stock_auto_off">Auto power off</string>
+    <string name="stock_firmware">Firmware</string>
+    <string name="stock_read_only">This screen only reads. It changes nothing on the camera.</string>
 </resources>

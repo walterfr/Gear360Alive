@@ -162,6 +162,12 @@ Fica para as amostras: OPAX, `vrot`, qualidade de costura, vídeo de 10 min, Goo
 
 ### M3: conexão com firmware original, lançamento 0.2 (M)
 
+**Teste real (2026-11-07):** o dono relatou que os dados da câmera apareceram na tela do tablet, e o log do app confirma a conexão: rede ativa às 00:18:14, câmera em `192.168.43.1`, sem nenhuma falha de resposta e sem crash. A primeira tentativa, às 00:17:29, terminou em rede não encontrada ou recusada. O dono confirmou que os dados batiam com a câmera, que a tela dela não mudou e que ela continuou ligada. A rede caiu às 00:21:08, cerca de 3 min depois, por causa ainda não confirmada; como a câmera seguiu ligada, o desligamento automático está descartado nessa queda. O `adb` por Wi-Fi caiu durante a conexão, então o tablet saiu da rede de casa ao menos temporariamente; o efeito na internet do tablet segue sem medida.
+
+**Um cliente por vez (hipótese):** o PC saiu da rede da câmera quando o tablet conectou, segundo o dono. Pode ser limite da câmera, mas falta testar, porque também houve orientação para tirar o PC dessa rede. Se confirmado, o app precisa avisar que outro aparelho pode perder a conexão.
+
+**Status (2026-11-07):** primeira parte feita, sem commit: tela só de leitura (`StockCameraScreen`) com `StockClient`, que por tipo só envia `X_GetSettingInformation` e `X_GetStorage`. Testes usam respostas reais da câmera, em `app/src/test/resources/stock/`. O sistema pede confirmação de rede a cada conexão; associação por `CompanionDeviceManager` fica para depois. A interface de `CameraClient` ainda não foi extraída.
+
 - Assistente: instrução do menu da câmera, código de 8 dígitos digitado uma vez e reconexão por `WifiNetworkSpecifier` e `CompanionDeviceManager`.
 - Cliente stock só com ações da lista permitida, testado contra as fixtures do M1.
 - Extrair interface de `CameraClient` apenas agora, porque passam a existir duas implementações.
@@ -337,6 +343,49 @@ Primeiro uso de POST: 10 ações, `POST /smp_4_`, com a câmera respondendo depo
 - **Ajustes úteis:** EV de -3 a +3, ISO máximo 400 a 1600, WB, nitidez, HDR, corte de vento, lentes, timer, intervalo e tempo de gravação.
 - **`ResetValue`:** confirma `X_SetReset` com `All`, `Camera` e `Connection`. Segue bloqueada.
 - **Bateria e firmware:** `X_GetSettingInformation` basta para a tela inicial, sem usar `GetInfomation`.
+
+### Primeiro `Shot`, 2026-11-07: serviço travou
+
+Um único `Shot` com `GPSINFO` vazio, às 00:26, em modo Photo. Sem resposta em 30 s. Depois disso, Wi-Fi, ping e portas 7676, 7679 e 9001 seguem ativos, mas `/smp_2_` não responde, e as consultas também falham. **Nenhum outro comando foi enviado.** A tela da câmera seguiu normal, e o serviço não voltou sozinho em cerca de 3 min. Depois de desligar e ligar pelo botão, a câmera voltou e tirou foto pelo próprio botão (relato do dono). Falta saber se a foto remota foi tirada.
+
+**Depois do reinício e de reativar Connect to iOS (00:31-00:32):** Wi-Fi, ping e portas 7676, 7679 e 9001 ativos, mas GET em `/smp_2_` deu timeout e SSDP não teve resposta. O serviço de controle **ainda não foi confirmado de volta**. Sem comandos enviados além de leitura.
+
+Hipóteses, nenhuma testada: falta `SetOperationState` com `changeToRVF` antes, como no log do app Samsung; `GPSINFO` vazio; ou `Shot` responde só depois de um evento que o cliente não ouve. **`Shot` fica suspenso** até entender a causa.
+
+**Pelo cartão (2026-11-07):** `360_0292.JPG` às 00:15 e `360_0293.JPG` às 00:31, numeração seguida e sem arquivo no horário do `Shot`, por volta de 00:26. Conclusão: o `Shot` **não gerou foto**. A foto das 00:31 bate com o teste pelo botão, e novos arquivos das 12:03 em diante indicam uso normal da câmera.
+
+### Amostras reais do R210, 2026-11-07
+
+Dezesseis arquivos em `100PHOTO/`, fora do git.
+
+| Arquivo | Formato | Observação |
+|---|---|---|
+| Fotos `360_*` | JPEG 5792x2896 | Firmware `0.81` no EXIF |
+| `360_0287`, `360_0295` | HEVC 2560x1280, 29,97 fps, AAC | Cabe no limite do tablet |
+| `360_0290`, `360_0297`, `360_0302` | HEVC 4096x2048, 24 fps, AAC | O último tem 8 min e 1,8 GB |
+| `360_0294` | HEVC 4096x2048, 10 fps, sem áudio | Time-lapse |
+| `SAM_0301` | HEVC 1920x1080, 59,94 fps, AAC | Uma lente, sem `vrot` e sem calibração |
+
+**A câmera grava em HEVC, inclusive 2560x1280.** O teste de 4K anterior usou H.264 sintético; falta repetir com HEVC real.
+
+**Formatos reais, corrigidos em `CameraMetadata`:**
+
+- **`opax` no MP4:** 164 bytes, com 4 bytes big-endian antes do bloco de 160. O código anterior rejeitava.
+- **Tag `0x0012` no JPEG:** o offset conta da MakerNote. O parser também lia o início errado do EXIF. Resultado anterior: **calibração nunca aplicada, em foto nem vídeo**, sem aviso.
+- **`vrot`:** uma amostra por quadro, e a primeira coluna é zero nas 11.492 amostras de `360_0302`. **Não há yaw**: dá para nivelar o horizonte, mas não estabilizar rotação. Os valores passam de 360 graus, agora normalizados.
+- **`acgy`:** bloco separado, ainda não decodificado, possivelmente com acelerômetro e giroscópio brutos. É o candidato para estabilização real no M6.
+
+**Ainda sem validar em imagem:** ordem e sinais dos eixos do `vrot`, e se `DiffX`, `DiffY` e `DiffRoll` devem ser aplicados. O nivelamento fica desligado por padrão até isso ser visto em vídeo real. O teste `RealR210FormatTest` usa as amostras quando elas estão presentes.
+
+### Validação no tablet com arquivos reais, 2026-11-07
+
+- **Foto 5792x2896:** salva em 1,5 s, tamanho integral, com metadados GPano.
+- **Vídeo HEVC 2560x1280 a 29,97 fps (5,2 s):** exportado com áudio e metadados esféricos, em cerca de 9 s no total, medição grosseira. Uma cópia de teste recodificada em 2560x1280, de 44 s e cena parada, exportou em cerca de 24 s. Ou seja, a velocidade depende do conteúdo, e 10 min ainda precisam de teste real.
+- **Vídeo HEVC 4096x2048:** aviso correto, exportação recusada com `IllegalArgumentException`, sem crash nem arquivo parcial. Confirma que o tablet não processa 4K da câmera. A prévia desse vídeo também não abre: falta tratar.
+- **Foto de uma lente (2304x1296):** dava "Lost contact with the camera". Corrigido e conferido: abre o seletor de apps do sistema.
+- **Costura:** fundo do ambiente alinhado à vista, sem medição. Objetos a centímetros das lentes quebram na emenda, por paralaxe, o que é limite físico. Abaixo do horizonte, o `stickFactor` do shader estreita a mistura e deixa a transição com borda dura: avaliar.
+- **Cena parada (`360_0303`), avaliação visual:** paredes, porta, móveis e objetos a mais de cerca de 1 m seguem contínuos nas emendas, sem degrau evidente. A mesa brilhante sob a câmera, muito próxima, quebra na emenda e mostra borda vertical. Não houve comparação com e sem calibração nem medição: a calibração parece adequada, sem prova de ganho.
+- **Eixos do `vrot`:** a cena parada não os valida. Nivelamento segue desligado.
 
 ### Listagem de arquivos
 

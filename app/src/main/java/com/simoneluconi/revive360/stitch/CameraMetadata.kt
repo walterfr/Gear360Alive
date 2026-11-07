@@ -88,8 +88,12 @@ object CameraMetadata {
 
     /**
      * Parses the payload of a `vrot` MP4 atom (after the 8-byte box size+type header, or including it).
-     * Layout: `u32 version(0)`, `u32 count`, then `count × 24 bytes`:
-     * 3 big-endian rational pairs `(num: s32, den: s32)` for pitch, roll, yaw in degrees.
+     * Layout: `u32 version(0)`, `u32 count`, then `count × 24 bytes`, one sample per frame:
+     * 3 big-endian rational pairs `(num: s32, den: s32)` in degrees.
+     *
+     * On real SM-R210 files the first pair is always 0: the camera records no yaw, so this can level
+     * the horizon but not stabilise rotation. The axis order and signs of the other two are not
+     * validated on real footage yet. The values can wrap past 360 degrees.
      */
     fun parseVrotBox(payload: ByteArray, durationUs: Long = 0L): List<GyroSample> {
         val offset = if (payload.size >= 8 &&
@@ -109,9 +113,9 @@ object CameraMetadata {
             val aNum = buf.int; val aDen = buf.int
             val bNum = buf.int; val bDen = buf.int
             val cNum = buf.int; val cDen = buf.int
-            val pitchDeg = if (aDen != 0) aNum.toFloat() / aDen else 0f
-            val rollDeg = if (bDen != 0) bNum.toFloat() / bDen else 0f
-            val yawDeg = if (cDen != 0) cNum.toFloat() / cDen else 0f
+            val yawDeg = wrapDegrees(if (aDen != 0) aNum.toFloat() / aDen else 0f)
+            val pitchDeg = wrapDegrees(if (bDen != 0) bNum.toFloat() / bDen else 0f)
+            val rollDeg = wrapDegrees(if (cDen != 0) cNum.toFloat() / cDen else 0f)
             out += GyroSample(
                 timestampUs = i * stepUs,
                 yaw = Math.toRadians(yawDeg.toDouble()).toFloat(),
@@ -124,7 +128,7 @@ object CameraMetadata {
 
     /**
      * Parses a single `00VR` chunk from the live `TTTS` stream (120 kHz clock).
-     * Payload is 24 bytes: 3 big-endian rational pairs `(num: s32, den: s32)` for yaw/pitch/roll.
+     * Payload is 24 bytes: 3 big-endian rational pairs `(num: s32, den: s32)`, as in [parseVrotBox].
      */
     fun parseLiveVrotChunk(payload: ByteArray, timestamp120kHz: Long): GyroSample? {
         if (payload.size < 24) return null
@@ -132,9 +136,9 @@ object CameraMetadata {
         val aNum = buf.int; val aDen = buf.int
         val bNum = buf.int; val bDen = buf.int
         val cNum = buf.int; val cDen = buf.int
-        val pitchDeg = if (aDen != 0) aNum.toFloat() / aDen else 0f
-        val rollDeg = if (bDen != 0) bNum.toFloat() / bDen else 0f
-        val yawDeg = if (cDen != 0) cNum.toFloat() / cDen else 0f
+        val yawDeg = wrapDegrees(if (aDen != 0) aNum.toFloat() / aDen else 0f)
+        val pitchDeg = wrapDegrees(if (bDen != 0) bNum.toFloat() / bDen else 0f)
+        val rollDeg = wrapDegrees(if (cDen != 0) cNum.toFloat() / cDen else 0f)
         return GyroSample(
             timestampUs = timestamp120kHz * 1_000_000L / 120_000L,
             yaw = Math.toRadians(yawDeg.toDouble()).toFloat(),
@@ -168,6 +172,12 @@ object CameraMetadata {
         )
     }
 
+    /** 358.2 and -359.4 as -1.8 and 0.6: the camera's values wrap, and a level must not spin. */
+    private fun wrapDegrees(degrees: Float): Float {
+        val wrapped = ((degrees + 180f) % 360f + 360f) % 360f - 180f
+        return wrapped
+    }
+
     private fun lerpAngle(a: Float, b: Float, t: Float): Float {
         var diff = (b - a) % (2f * Math.PI.toFloat())
         if (diff > Math.PI) diff -= 2f * Math.PI.toFloat()
@@ -178,14 +188,18 @@ object CameraMetadata {
     /**
      * Parses the 160-byte `OPAX` block (`MakerNote 0x0012` or MP4 `opax` payload).
      * Supports both SM-R210 (version 2: 20× float64 LE) and SM-C200 (version 1: 40× int32 LE).
+     * On real SM-R210 files the MP4 payload is 164 bytes: a big-endian version, then the block.
      */
     fun parseOpax(bytes: ByteArray, base: DualFisheye = DualFisheye()): DualFisheye? {
-        val offset = if (bytes.size >= 168 &&
-            bytes[4] == 'o'.code.toByte() &&
-            bytes[5] == 'p'.code.toByte() &&
-            bytes[6] == 'a'.code.toByte() &&
-            bytes[7] == 'x'.code.toByte()
-        ) 8 else 0
+        val offset = when {
+            bytes.size >= 168 &&
+                bytes[4] == 'o'.code.toByte() &&
+                bytes[5] == 'p'.code.toByte() &&
+                bytes[6] == 'a'.code.toByte() &&
+                bytes[7] == 'x'.code.toByte() -> 8
+            bytes.size == 164 -> 4
+            else -> 0
+        }
         if (bytes.size - offset < 160) return null
         val buf = ByteBuffer.wrap(bytes, offset, 160).order(ByteOrder.LITTLE_ENDIAN)
         val firstInt = buf.getInt(offset)
@@ -284,7 +298,8 @@ object CameraMetadata {
             "MM" -> ByteOrder.BIG_ENDIAN
             else -> return null
         }
-        val buf = ByteBuffer.wrap(app1, tiffStart, app1.size - tiffStart).order(order)
+        // slice(): the offsets below count from the TIFF header, and absolute gets ignore wrap()'s offset
+        val buf = ByteBuffer.wrap(app1, tiffStart, app1.size - tiffStart).slice().order(order)
         if (buf.getShort(2).toInt() != 42) return null
         val ifd0 = buf.getInt(4)
         val exifIfd = findTiffTagOffset(buf, ifd0, 0x8769) ?: return null
@@ -293,8 +308,7 @@ object CameraMetadata {
         for (headerSkip in intArrayOf(0, 8, 10, 12)) {
             val base = makerNote.first + headerSkip
             if (base + 6 > buf.limit()) continue
-            val slice = findMakerNoteTag0012(buf, base, makerNote.first)
-            if (slice != null) {
+            for (slice in findMakerNoteTag0012(buf, base, makerNote.first)) {
                 val raw = ByteArray(slice.second)
                 System.arraycopy(app1, tiffStart + slice.first, raw, 0, slice.second)
                 parseOpax(raw, defaultModel)?.let { return it }
@@ -331,10 +345,11 @@ object CameraMetadata {
         return null
     }
 
-    private fun findMakerNoteTag0012(buf: ByteBuffer, ifdOffset: Int, makerBase: Int): Pair<Int, Int>? {
-        if (ifdOffset < 0 || ifdOffset + 2 > buf.limit()) return null
+    /** Where the block may be: on the SM-R210 the offset counts from the maker note, not the TIFF header. */
+    private fun findMakerNoteTag0012(buf: ByteBuffer, ifdOffset: Int, makerBase: Int): List<Pair<Int, Int>> {
+        if (ifdOffset < 0 || ifdOffset + 2 > buf.limit()) return emptyList()
         val count = buf.getShort(ifdOffset).toInt() and 0xFFFF
-        if (count !in 1..128 || ifdOffset + 2 + count * 12 > buf.limit()) return null
+        if (count !in 1..128 || ifdOffset + 2 + count * 12 > buf.limit()) return emptyList()
         for (i in 0 until count) {
             val entry = ifdOffset + 2 + i * 12
             val tag = buf.getShort(entry).toInt() and 0xFFFF
@@ -349,14 +364,12 @@ object CameraMetadata {
                 }
                 val bytes = buf.getInt(entry + 4) * unit
                 val rawOff = buf.getInt(entry + 8)
-                for (candidate in intArrayOf(rawOff, makerBase + rawOff)) {
-                    if (bytes >= 160 && candidate >= 0 && candidate + bytes <= buf.limit()) {
-                        return candidate to bytes
-                    }
-                }
+                return listOf(makerBase + rawOff, rawOff)
+                    .filter { bytes >= 160 && it >= 0 && it + bytes <= buf.limit() }
+                    .map { it to bytes }
             }
         }
-        return null
+        return emptyList()
     }
 
     /** Finds a nested MP4 box path (e.g. `["moov", "udta", "vrot"]`) and returns `(payloadOffset, payloadSize)`. */

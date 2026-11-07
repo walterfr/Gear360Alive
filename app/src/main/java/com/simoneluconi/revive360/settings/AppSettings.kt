@@ -39,6 +39,11 @@ class AppSettings(context: Context) {
      */
     val devHost: StateFlow<String?> = _devHost.asStateFlow()
 
+    /** The Wi-Fi code the camera shows on its screen, kept so it is typed once. App-private, never logged. */
+    var stockPassphrase: String?
+        get() = prefs.getString(STOCK_PASSPHRASE, null)
+        set(value) = prefs.edit { putString(STOCK_PASSPHRASE, value) }
+
     fun setTheme(mode: ThemeMode) {
         _theme.value = mode
         prefs.edit { putString(THEME, mode.name) }
@@ -65,6 +70,7 @@ class AppSettings(context: Context) {
         const val ACCENT = "accent"
         const val HAPTICS = "haptics"
         const val DEV_HOST = "dev_host"
+        const val STOCK_PASSPHRASE = "stock_passphrase"
 
         inline fun <reified T : Enum<T>> enumOr(name: String?, default: T): T =
             enumValues<T>().firstOrNull { it.name == name } ?: default

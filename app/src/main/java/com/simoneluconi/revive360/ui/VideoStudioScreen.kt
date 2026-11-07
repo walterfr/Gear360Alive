@@ -108,7 +108,7 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
     var playing by remember { mutableStateOf(false) }
     var durationMs by remember { mutableLongStateOf(1L) }
     var positionMs by remember { mutableLongStateOf(0L) }
-    var flowState by remember { mutableStateOf(true) }
+    var flowState by remember { mutableStateOf(false) } // Off until the level is validated on real footage
     var viewFinder by remember { mutableStateOf(false) }
     var nadirPatch by remember { mutableStateOf(false) }
     var showTelemetry by remember { mutableStateOf(false) }

@@ -71,6 +71,12 @@ fun ImportCard() {
     }
     Card(padding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)) {
         SettingRow(
+            title = stringResource(R.string.stock_open),
+            icon = AppIcons.Wifi,
+            onClick = { nav.navigate(Screen.StockCamera) },
+        )
+        Hairline()
+        SettingRow(
             title = stringResource(R.string.gallery_tab_phone),
             subtitle = stringResource(R.string.phone_subtitle),
             icon = AppIcons.Gallery,

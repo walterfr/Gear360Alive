@@ -71,6 +71,7 @@ sealed interface Screen {
     data class PhonePanorama(val item: PhoneItem) : Screen
     data class VideoStudio(val path: String) : Screen
     data class PhoneVideoStudio(val item: PhoneItem) : Screen
+    data object StockCamera : Screen
 }
 
 /** What screens need from the activity: navigation, short messages, system prompts. */
@@ -158,6 +159,7 @@ fun AppRoot(app: Revive360App, findCamera: ((CompanionWifi.Found?) -> Unit) -> U
                             is Screen.PhonePanorama -> PhonePanoramaScreen(screen.item)
                             is Screen.VideoStudio -> VideoStudioScreen(path = screen.path)
                             is Screen.PhoneVideoStudio -> VideoStudioScreen(phoneItem = screen.item)
+                            Screen.StockCamera -> StockCameraScreen()
                         }
                     }
                 }

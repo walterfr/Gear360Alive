@@ -8,8 +8,8 @@
     <string name="camera_generic">Gear 360</string>
 
     <!-- Home -->
-    <string name="welcome_title">Il collegamento alla fotocamera è in arrivo</string>
-    <string name="welcome_text">Gear360 Alive è in sviluppo per la Gear 360 (2017) con il firmware originale, senza modificare la fotocamera. Non può ancora collegarsi a una fotocamera.</string>
+    <string name="welcome_title">La tua Gear 360, con il firmware originale</string>
+    <string name="welcome_text">Gear360 Alive non modifica la fotocamera. Per ora legge lo stato della fotocamera e lavora con i file che importi. Lo scatto dall\'app è ancora in sviluppo.</string>
     <string name="welcome_action">Configura la fotocamera</string>
     <string name="adapter_not_supported">Questa fotocamera non è ancora supportata del tutto (%1$s): vedi solo quello che dichiara.</string>
     <string name="status_battery">Batteria</string>
@@ -301,4 +301,24 @@
     <string name="export_beyond_decoder">Questo dispositivo dichiara meno di quanto richiede il video. L\'esportazione può non riuscire; l\'originale resta al sicuro.</string>
     <string name="export_reduced">Questo dispositivo esporterà a %1$dx%2$d.</string>
     <string name="export_slow">Questa esportazione durerà più del video.</string>
+
+    <!-- Camera on its original firmware -->
+    <string name="stock_open">Vedi lo stato della fotocamera</string>
+    <string name="stock_title">Fotocamera</string>
+    <string name="stock_steps">Sulla fotocamera, tieni premuto Menu finché appare un\'opzione Connect to, premi Menu finché mostra Connect to iOS e conferma con il pulsante di scatto. Poi digita il codice mostrato sullo schermo. Basta farlo una volta.</string>
+    <string name="stock_code">Codice sullo schermo della fotocamera</string>
+    <string name="stock_connect">Connetti</string>
+    <string name="stock_joining">Connessione…</string>
+    <string name="stock_lost">Il Wi-Fi della fotocamera si è spento. Potrebbe essersi spenta da sola: riavvialo dal suo menu.</string>
+    <string name="stock_not_found">Rete della fotocamera non trovata. Controlla che sia attiva e che il codice sia giusto.</string>
+    <string name="stock_reading">Lettura della fotocamera…</string>
+    <string name="stock_no_answer">La fotocamera non risponde.</string>
+    <string name="stock_battery">Batteria</string>
+    <string name="stock_charging">%1$s, in carica</string>
+    <string name="stock_card">Scheda SD</string>
+    <string name="stock_card_free">%1$.1f GB liberi su %2$.1f GB</string>
+    <string name="stock_mode">Modalità</string>
+    <string name="stock_auto_off">Spegnimento automatico</string>
+    <string name="stock_firmware">Firmware</string>
+    <string name="stock_read_only">Questa schermata legge soltanto. Non cambia nulla sulla fotocamera.</string>
 </resources>

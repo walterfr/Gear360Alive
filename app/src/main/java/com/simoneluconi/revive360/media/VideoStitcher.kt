@@ -47,7 +47,7 @@ object VideoStitcher {
         val preset: AspectPreset = AspectPreset.VERTICAL_9_16,
         val keyframes: List<Keyframe> = emptyList(),
         val defaultView: ViewState = ViewState(),
-        val flowStateStabilization: Boolean = true,
+        val flowStateStabilization: Boolean = false,
         val nadirPatch: Boolean = false,
         val hudTelemetry: Boolean = false,
         val gpxTrack: List<TelemetryHud.GpxPoint> = emptyList(),

@@ -63,19 +63,19 @@ class CameraMetadataTest {
 
     @Test
     fun parsesMp4VrotBoxAndInterpolatesHorizonLock() {
-        // 2 samples: sample 0 = (pitch=10.0 deg, roll=-5.0 deg, yaw=90.0 deg)
-        //            sample 1 = (pitch=20.0 deg, roll=5.0 deg, yaw=100.0 deg)
+        // 2 samples: sample 0 = (yaw=90.0 deg, pitch=10.0 deg, roll=-5.0 deg)
+        //            sample 1 = (yaw=100.0 deg, pitch=20.0 deg, roll=5.0 deg)
         val payload = ByteBuffer.allocate(8 + 2 * 24).order(ByteOrder.BIG_ENDIAN).apply {
             putInt(0) // version
             putInt(2) // count = 2
             // sample 0
+            putInt(900); putInt(10)
             putInt(100); putInt(10)
             putInt(-50); putInt(10)
-            putInt(900); putInt(10)
             // sample 1
+            putInt(1000); putInt(10)
             putInt(200); putInt(10)
             putInt(50); putInt(10)
-            putInt(1000); putInt(10)
         }.array()
 
         val samples = CameraMetadata.parseVrotBox(payload, durationUs = 1_000_000L)
@@ -102,9 +102,9 @@ class CameraMetadataTest {
     @Test
     fun parsesLive00VrChunk() {
         val chunk = ByteBuffer.allocate(24).order(ByteOrder.BIG_ENDIAN).apply {
+            putInt(450); putInt(10)  // yaw = 45.0 deg
             putInt(125); putInt(10)  // pitch = 12.5 deg
             putInt(-30); putInt(10)  // roll = -3.0 deg
-            putInt(450); putInt(10)  // yaw = 45.0 deg
         }.array()
         val gyro = CameraMetadata.parseLiveVrotChunk(chunk, timestamp120kHz = 120_000L)
         assertNotNull(gyro)
@@ -159,7 +159,8 @@ class CameraMetadataTest {
 
         val gyro = CameraMetadata.readMp4Gyro(mp4)
         assertEquals(2, gyro.size)
-        assertEquals(Math.toRadians(4.5).toFloat(), gyro[0].pitch, 1e-5f)
+        assertEquals(Math.toRadians(4.5).toFloat(), gyro[0].yaw, 1e-5f)
+        assertEquals(Math.toRadians(-1.5).toFloat(), gyro[0].pitch, 1e-5f)
         // Auto-detected duration from mvhd = 2_500_000 us
         assertEquals(2_500_000L, gyro[1].timestampUs)
     }
