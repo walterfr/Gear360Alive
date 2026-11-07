@@ -22,9 +22,16 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 
 ### Repositório
 
-- Branch de trabalho: `m0-stock-first`. Commits locais `8212912` (M0, sondas, plano), `4523c46` (importação, `ProcessingPolicy`, `DeviceCodecs`), `c874662` (`StockClient`, tela de status, correções de OPAX/vrot, fotos de uma lente). **Nada foi enviado ao GitHub**; a `main` remota ainda tem o instalador de firmware antigo.
-- **Há trabalho sem commit**: importação de pasta (`ImportController.kt`), costura de vídeo com polinômio de lente (`DualFisheye`, `OesSphereRenderer`, `CameraMetadata`), botão Share, testes novos, `tools/stock_probe/session_step.py`, preview ao vivo (`StockClient.openLive`, `StockCameraScreen`) e `docs/PLANO.md`. Commit só quando o dono pedir.
-- Testes: `./gradlew :app:testDebugUnitTest` dá 79 testes, 0 falhas, 1 ignorado. `StockSafetyTest` falha se `Features.EXPERIMENTAL` for `true`: é proposital.
+- Branch de trabalho: `m0-stock-first`, enviada ao GitHub (`origin`, `walterfr/Gear360Alive`). A `main` remota **não** recebeu nada e ainda tem o instalador de firmware antigo; não mesclar sem o dono pedir.
+- Commits da branch: `8212912` (M0, sondas, plano), `4523c46` (importação, `ProcessingPolicy`, `DeviceCodecs`), `c874662` (`StockClient`, tela de status, OPAX/vrot, fotos de uma lente), `c7821c9` (preview ao vivo, costura com polinômio de lente, importação de pasta, Share), `7d19fca` (Wi-Fi em baixa latência, medição de atraso, `--stream`) e o commit deste arquivo.
+- Testes: `./gradlew :app:testDebugUnitTest` (80 testes, 0 falhas, 1 ignorado). `StockSafetyTest` falha se `Features.EXPERIMENTAL` for `true`: é proposital, para nada ir ao commit com a opção ligada.
+- APK de teste para o tablet: troque `EXPERIMENTAL` para `true` em `ui/Features.kt`, rode `./gradlew :app:assembleDebug`, devolva a `false` e instale `app/build/outputs/apk/debug/app-debug.apk` com `adb -s <serial> install -r`.
+
+### Como trabalhar com o dono
+
+- Respostas em português, curtas. Commit só quando o dono pedir; push e merge também.
+- Cada comando novo à câmera: preparar com dry run e self-test, mostrar exatamente o que será enviado e o risco, esperar "Sim, enviar", enviar **uma vez**, registrar o resultado em `docs/PLANO.md`, seção 13.
+- O dono opera a câmera e o tablet; pergunte o que a tela da câmera mostrou quando importar.
 - Amostras reais ficam em `100PHOTO/` (fora do git). O APK oficial (`com.samsung.android.samsunggear360manager_1.0.22-43...apk`) está na raiz, fora do git: só extrair fatos técnicos, nunca copiar código Samsung nem executá-lo.
 
 ### Privacidade
@@ -35,8 +42,10 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 ### Dispositivos
 
 - Câmera: SM-R210, firmware `R210GLU0ARB2_0.81`. Menu "Connect to iOS" cria a rede `Gear 360(7F97)`, câmera em `192.168.43.1`.
-- Tablet de teste: Lenovo TB361FU, Android 16, sem giroscópio, tela apaga em 60 s. adb sem fio: `adb-HND2KQKK-RYUn3l._adb-tls-connect._tcp`. Decodifica até 2560x1440; 4K HEVC é recusado.
-- PC: Windows, Python 3.15, Android SDK em `%LOCALAPPDATA%\Android\Sdk`. A conexão Wi-Fi do PC com a câmera cai às vezes; os scripts checam a rede antes de enviar.
+- Tablet de teste: Lenovo TB361FU, Android 16, sem giroscópio, tela apaga em 60 s. Decodifica até 2560x1440; 4K HEVC é recusado. Pacote `io.github.walterfr.gear360alive`; log do app em `files/log/events.txt` (`adb -s <serial> shell run-as io.github.walterfr.gear360alive cat files/log/events.txt`).
+- adb sem fio: o nome mDNS é `adb-HND2KQKK-RYUn3l` (às vezes aparece como `adb-HND2KQKK-RYUn3l (2)`), IP `192.168.1.189`, porta muda. Se `adb devices` vier vazio, rode `adb kill-server`, `adb start-server` e `adb mdns services`. Com o tablet na rede da câmera não há adb.
+- PC: Windows, Python 3.15, Android SDK em `%LOCALAPPDATA%\Android\Sdk`. Entra na câmera com `netsh wlan connect name="Gear 360(7F97)"`. A conexão cai às vezes, sobretudo após `UNSUBSCRIBE` e com o desligamento automático da câmera (5 min); os scripts checam a rede antes de enviar. No Git Bash, argumentos que começam com `/` são reescritos: por isso `--stream high|bc_high`.
+- Modo "Connect to Android" usa Bluetooth e Wi-Fi Direct (`192.168.49.x`, pelo log da C200): não usado nem testado.
 
 ### Protocolo do firmware original (validado no R210)
 
@@ -50,9 +59,9 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 
 ### Ferramentas (`tools/stock_probe/`, relatórios em `reports/`, fora do git)
 
-- `probe.py` (sonda só leitura), `soap_query.py` (consultas), `list_media.py`, `shot_once.py` (**não usar `--send`**), `session_step.py --step subscribe|rvf|info|stream` (sem `--send` só mostra o que enviaria; `--self-test` roda contra câmera falsa).
+- `probe.py` (sonda só leitura), `soap_query.py` (consultas), `list_media.py`, `shot_once.py` (**não usar `--send`**), `session_step.py --step subscribe|rvf|info|stream [--stream high|bc_high]` (sem `--send` só mostra o que enviaria; `--self-test` roda contra câmera falsa; o stream nunca é gravado, só contagens e a estrutura dos primeiros blocos).
 
-### Em andamento: preview ao vivo no tablet
+### Preview ao vivo no tablet (funciona, ainda atrás de `EXPERIMENTAL`)
 
 - `StockClient.openLive()` repete a sequência testada. `SUBSCRIBE`/`UNSUBSCRIBE` usam socket da `Network` da câmera, porque `HttpURLConnection` não aceita esses métodos. Escuta `NOTIFY` na 8059. Testes em `StockClientTest`.
 - `StockCameraScreen` mostra "Live preview (test)" só com `Features.EXPERIMENTAL`. Usa `SphereVideoView` e `LiveViewDecoder`, nunca reabre sozinho e pausa as consultas de status durante o stream.
@@ -64,8 +73,10 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 ### Próximos passos
 
 1. Repetir o preview mais longo para ver se a queda de vazão após 15 s se repete; se sim, investigar o Wi-Fi da câmera.
-2. `Shot` dentro da sessão, em modo Photo, com aprovação.
-3. Pendências M2: exportar com app em segundo plano ou tela apagada; faixa escura no vídeo (queda de luz/OPAI); leitor de cartão real; preview de 4K; confirmar foto no Google Photos.
+2. `Shot` dentro da sessão, em modo Photo, com aprovação: novo passo em `session_step.py` (SUBSCRIBE, changeToRVF, GetInfomation, Shot com `GPSINFO` vazio, UNSUBSCRIBE), conferindo modo Photo, bateria e espaço antes, como `shot_once.py`.
+3. Tirar o preview de trás de `EXPERIMENTAL` quando a queda de vazão estiver explicada.
+4. Entender o layout de `livestream_bc_high.avi` (bloco `00VR` de 32 bytes) para ter giroscópio e áudio ao vivo.
+5. Pendências M2: exportar com app em segundo plano ou tela apagada; faixa escura no vídeo (queda de luz/OPAI); leitor de cartão real; preview de 4K; confirmar foto no Google Photos.
 
 ### Correções a este arquivo
 
