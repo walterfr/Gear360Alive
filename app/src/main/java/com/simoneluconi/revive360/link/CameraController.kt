@@ -802,7 +802,7 @@ class CameraController(
     fun dngSavedKey(photo: CameraFile): String = savedKey(photo) + "|dng"
 
     /**
-     * Saves a photo's RAW pair as one DNG (both lenses side by side) in the phone's Download/Revive360:
+     * Saves a photo's RAW pair as one DNG (both lenses side by side) in the phone's Download/Gear360Alive:
      * the two dumps come to the cache (a broken transfer resumes), the DNG is written from them
      * straight into the shared storage, the dumps go. Progress in [downloads] under [dngKey].
      */

@@ -1,92 +1,31 @@
-# Revive360 – for Gear 360
+# Gear360 Alive
 
-**Your Samsung Gear 360 works again: with any Android phone, free, and with no Samsung account.**
+Simple Android app for the Samsung Gear 360 (2017, SM-R210), in the style of modern 360 camera apps. It runs on the camera's **original firmware** and does not change the camera.
 
-**Website:** [simoneluconi.github.io/Revive360](https://simoneluconi.github.io/Revive360/) · [Privacy policy](https://simoneluconi.github.io/Revive360/privacy/)
+**Status: early development. It cannot connect to a camera yet.** There is no release to install.
 
-Samsung has stopped supporting the Gear 360 camera, and its apps no longer work on today's
-phones, which leaves a good 360° camera unusable. Revive360 brings it back to life: a free
-phone app plus a small add-on for the camera, and the camera does everything it used to.
+## Plan
 
-<p align="center">
-  <img src="docs/screenshots/home.png" width="19%" alt="Home: the camera, its battery and card, and the shutter">
-  <img src="docs/screenshots/settings.png" width="19%" alt="Camera settings">
-  <img src="docs/screenshots/liveview.png" width="19%" alt="Live view">
-  <img src="docs/screenshots/gallery.png" width="19%" alt="The photos and videos on the camera">
-  <img src="docs/screenshots/viewer360.png" width="19%" alt="The 360 viewer, framing a normal photo">
-</p>
+[docs/PLANO.md](docs/PLANO.md) (in Portuguese) has the plan, the camera safety rules and the test results.
 
-## In short
+On a real SM-R210 with original firmware (`R210GLU0ARB2`), without Bluetooth, the camera's "Connect to iOS" menu exposes its UPnP server, and query actions answer. Capture and live view are not tested yet.
 
-| | |
-|---|---|
-| **The problem** | Samsung's Gear 360 apps are gone. Without them you cannot see the camera's photos on your phone or use it from the phone. |
-| **What this does** | Use the camera from your phone again: shoot, see live, change the settings, copy photos and videos, and get ready-made 360° photos. |
-| **Who it is for** | Anyone with a Gear 360 (2016 or 2017) and an Android phone of any brand. |
-| **What it costs** | Nothing. Free and open source, with no account, no cloud and no ads. |
-| **Status** | Works today. Tested end to end, from setup to everyday use, on the Gear 360 (2016) and the Gear 360 (2017). |
+## Camera safety
 
-## What you can do
+This project does not install anything on the camera. The app has no firmware path, and a test (`StockSafetyTest`) keeps it that way.
 
-- **Shoot from your phone**: photos, videos, time-lapses and looping videos.
-- **See what the camera sees**, live, before you shoot.
-- **Change the camera's settings**: lens, size, self-timer, exposure, white balance and more.
-- **Get your photos and videos** onto the phone, or delete them from the camera, one or many at a time.
-- **Get real 360° photos**, ready for Google Photos and other apps.
-- **Shoot RAW**, which Samsung's own app never offered: the camera also keeps the sensor data of
-  both lenses, and the app turns it into a DNG for Lightroom and other raw editors, one photo or
-  many at once. 360° photos; in low light they have no noise reduction. 12-bit on the Gear 360
-  (2016), about 60 MB per photo; 10-bit on the 2017, about 34 MB.
-- **Make normal photos from a 360° one**: look around, straighten it, choose the frame you want,
-  or make a "little planet".
+`camera/`, `install.sh`, `firmware/` and `docs/INSTALL.md` come from Revive360 and are not used by this app. **They change the camera's firmware: do not use them on a camera you cannot afford to lose.**
 
-## Why it is easy to use
+## Build
 
-- **Any Android phone** (Android 10 or later): it does not have to be a Samsung.
-- **Pairs by itself**: the phone finds the camera over Bluetooth and sets up the connection.
-  There is nothing to type.
-- **Private**: the phone talks straight to the camera. Nothing goes to the internet.
-- **Saves the battery**: the camera's Wi-Fi is on only while the app needs it.
-- **Can be undone**: Samsung's original software goes back on the camera the same way.
+Needs Android Studio or JDK 17 with the Android SDK.
 
-## Which cameras
+```sh
+./gradlew testDebugUnitTest assembleDebug
+```
 
-| Camera | Works? |
-|---|---|
-| Gear 360 (2016, SM-C200) | Yes |
-| Gear 360 (2017, SM-R210) | Yes |
+## Credits and license
 
-Any firmware: installing ours also updates the camera to Samsung's last one.
+Gear360 Alive is built on [Revive360](https://github.com/simoneluconi/Revive360) by Simone Luconi, and keeps its history and its [GNU GPL v3](LICENSE) license. See [NOTICE.md](NOTICE.md).
 
-## How to get started
-
-Setting it up takes about half an hour, once. You need the camera, its microSD card, an Android
-phone and a computer with a card reader.
-
-1. **Get the app** from [Google Play](https://play.google.com/store/apps/details?id=com.simoneluconi.revive360), or download the APK from the
-   [latest GitHub release](https://github.com/simoneluconi/Revive360/releases/latest).
-2. **Set up the camera**: download a few files from the
-   [latest release](https://github.com/simoneluconi/Revive360/releases/latest), copy them to the
-   camera's card and switch it on, in two or three short steps. The
-   **[install guide](docs/INSTALL.md)** says which files and when (or how to build them yourself
-   with one script).
-
-> Changing the camera's software is at your own risk. Samsung's original software can always be
-> put back in the same way: the guide explains how.
-
-## For developers
-
-How it works, how to build it and how to add other cameras: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
-How the RAW capture was found and what the files contain: [docs/firmware/14_raw_capture.md](docs/firmware/14_raw_capture.md)
-(the 2017: [docs/firmware/15_r210_port.md](docs/firmware/15_r210_port.md#5-raw));
-scripts to make the DNGs on a computer instead: [tools/raw/](tools/raw/).
-Contributions are welcome.
-
-## License
-
-Free software under the [GNU GPL v3](LICENSE). Revive360 is an independent project, not
-made, affiliated with or endorsed by Samsung. Samsung and Gear 360 are trademarks of Samsung
-Electronics; they are used here only to say which camera the app works with.
-
-The app and the website use the [Manrope](https://github.com/googlefonts/manrope) font, under the
-[SIL Open Font License 1.1](docs/manrope-OFL.txt).
+This is an independent project, not made, affiliated with or endorsed by Samsung or by the Revive360 project. Samsung and Gear 360 are trademarks of Samsung Electronics, used here only to say which camera the app works with.

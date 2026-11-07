@@ -215,6 +215,7 @@ fun LiveViewScreen() {
                 Chip(m.label, selected = mode == m) { applyMode(m) }
             }
             Chip("FlowState", selected = flowState) { flowState = !flowState }
+            if (Features.EXPERIMENTAL) {
             Chip("Nadir Patch", selected = nadirPatch) { nadirPatch = !nadirPatch }
             Chip("OBS Stream", selected = obsEnabled) {
                 val next = !obsEnabled
@@ -233,6 +234,7 @@ fun LiveViewScreen() {
                     obsEnabled = false
                     obsUrl = ""
                 }
+            }
             }
         }
         if (obsEnabled && obsUrl.isNotEmpty()) {

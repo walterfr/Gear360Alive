@@ -417,9 +417,11 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                     Chip(p.label, selected = preset == p) { preset = p }
                 }
                 Chip("FlowState", selected = flowState) { flowState = !flowState }
-                Chip("ViewFinder", selected = viewFinder) {
-                    viewFinder = !viewFinder
-                    if (!viewFinder) sphereView?.manualOverride = false
+                if (Features.EXPERIMENTAL) {
+                    Chip("ViewFinder", selected = viewFinder) {
+                        viewFinder = !viewFinder
+                        if (!viewFinder) sphereView?.manualOverride = false
+                    }
                 }
                 Chip("Little Planet", selected = sphereView?.view?.projection == Projection.STEREOGRAPHIC) {
                     val sv = sphereView ?: return@Chip
@@ -431,6 +433,7 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                     }
                     sv.setView(nextView)
                 }
+                if (Features.EXPERIMENTAL) {
                 Chip("Nadir Patch", selected = nadirPatch) { nadirPatch = !nadirPatch }
                 Chip("HUD Stats", selected = showTelemetry) { showTelemetry = !showTelemetry }
                 Chip(if (gpxTrack.isEmpty()) "+ GPX" else "GPX (${gpxTrack.size})", selected = gpxTrack.isNotEmpty()) {
@@ -473,8 +476,10 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                         }
                     }
                 }
+                }
             }
 
+            if (Features.EXPERIMENTAL) {
             Spacer(Modifier.height(6.dp))
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -498,6 +503,7 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                         nav.message("Applied Shot Lab: ${tpl.label}", MessageKind.GOOD)
                     }
                 }
+            }
             }
 
             Spacer(Modifier.height(10.dp))

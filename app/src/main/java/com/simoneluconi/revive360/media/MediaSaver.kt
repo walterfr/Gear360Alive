@@ -13,10 +13,10 @@ import java.io.OutputStream
 /**
  * Publishes a downloaded original to the phone's shared storage, untouched (the camera's dual-fisheye
  * files are kept as they are; a stitched copy is a file of its own). Photos go to Pictures, videos to Movies,
- * RAW and anything else to Download, each in a "Revive360" folder. No storage permission needed.
+ * RAW and anything else to Download, each in a "Gear360Alive" folder. No storage permission needed.
  */
 object MediaSaver {
-    const val FOLDER = "Revive360"
+    const val FOLDER = "Gear360Alive"
 
     fun publish(context: Context, file: CameraFile, source: File): Uri =
         publish(context, file.name, file.kind, mimeType(file), file.mtime, source)

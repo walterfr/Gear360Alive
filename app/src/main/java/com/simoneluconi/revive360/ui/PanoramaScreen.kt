@@ -417,6 +417,7 @@ private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String) {
             ) {
                 Chip(stringResource(R.string.pano_kind_360), selected = !flat) { showFlat(false) }
                 Chip(stringResource(R.string.pano_kind_flat), selected = flat) { showFlat(true) }
+                if (Features.EXPERIMENTAL) {
                 Chip("Nadir Patch", selected = nadirPatch) {
                     nadirPatch = !nadirPatch
                     baseDualPicture?.let { it.model = it.model.copy(nadirPatch = nadirPatch) }
@@ -465,6 +466,7 @@ private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String) {
                     if (!saving && picture is DualFisheyeImage) {
                         starlapsePicker.launch("image/*")
                     }
+                }
                 }
             }
         }

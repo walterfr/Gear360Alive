@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Revive360"
+rootProject.name = "Gear360Alive"
 include(":app")

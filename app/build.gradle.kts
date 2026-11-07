@@ -16,11 +16,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.simoneluconi.revive360"
+        applicationId = "io.github.walterfr.gear360alive"
         minSdk = 29
         targetSdk = 37
-        versionCode = 7
-        versionName = "0.4.0"
+        versionCode = 1
+        versionName = "0.0.1"
     }
 
     signingConfigs {

@@ -2,27 +2,30 @@
 
 Repositório Oficial: [`walterfr/Gear360Alive`](https://github.com/walterfr/Gear360Alive)
 
-Documento central de arquitetura, inteligência consolidada dos 18 repositórios analisados, decisões técnicas e plano de execução para transformar a Samsung Gear 360 (2016 SM-C200 e 2017 SM-R210) em uma câmera moderna com experiência estilo **Insta360**.
+Referência técnica para transformar a Samsung Gear 360 em uma câmera moderna com experiência estilo **Insta360**.
+
+## Regras obrigatórias
+
+**O plano vigente é [`docs/PLANO.md`](docs/PLANO.md). Onde este arquivo divergir dele, vale o plano.**
+
+- A câmera do projeto é única e fica no **firmware original**. Não escrever `.bin`, `fwupgrade.txt`, `info.tg` ou `cmd.tg` no cartão, não executar `install.sh`, nem usar `camera/`.
+- Nunca enviar `X_SetFormat` ou `X_SetReset`, nem qualquer ação fora da lista permitida.
+- Comando novo à câmera: revisar argumentos, testar um por vez, registrar o resultado e ter aprovação do dono da câmera.
+- Originais nunca são alterados. Apagar da câmera exige confirmação.
+- Funções não validadas em câmera real ficam atrás de `Features.EXPERIMENTAL`.
 
 ---
 
 ## 1. Decisões de Produto e Arquitetura
 
-1. **Câmeras Suportadas (Dia 1):**
-   - **Samsung Gear 360 (2016, SM-C200):** Firmware `C200GLU0AQK1`, sensor Sony IMX147 (2× 15MP, fotos 7776×3888, vídeos até 3840×1920@30, RAW 12-bit RGGB).
-   - **Samsung Gear 360 (2017, SM-R210):** Firmware `R210GLU0ARB2`, sensor Samsung S5K2M8SX (2× 8.4MP, fotos 5792×2896 / 5472×2736, vídeos até 4096×2048@24, RAW 10-bit GRBG).
+1. **Câmeras:**
+   - **Samsung Gear 360 (2017, SM-R210), a câmera do projeto:** Firmware `R210GLU0ARB2`, sensor Samsung S5K2M8SX (2× 8.4MP, fotos 5792×2896 / 5472×2736, vídeos até 4096×2048@24, RAW 10-bit GRBG).
+   - **Samsung Gear 360 (2016, SM-C200):** sem garantia de teste. Firmware `C200GLU0AQK1`, sensor Sony IMX147 (2× 15MP, fotos 7776×3888, vídeos até 3840×1920@30, RAW 12-bit RGGB).
 
-2. **Estratégia de Conexão Híbrida (Opção A) & Atualização Embutida (In-App Firmware & OTA):**
-   - **Modo Principal (`g360rd` Protocol v1):** Daemon leve em C na câmera (`HTTP :8360` + `BLE GATT d9c70001-...`) com shim `LD_PRELOAD` no `di-camera-app`. Garante BLE wake-up do Wi-Fi sob demanda, controle total de captura/exposição, Live View HEVC (`TTTS`), RAW DNG e pareamento via `CompanionDeviceManager` + `WifiNetworkSpecifier` (mantendo dados móveis 4G/5G ativos no telefone).
-   - **Atualizador de Firmware e Preparador de SD Embutido no App (Zero-PC):**
-     - **Pacotes Leves Embutidos no APK (`assets/`):** Os pacotes de ativação (`Revive360-activate.zip`, `p8_invalidate.sh`) e os binários do daemon/plugin (`g360rd`, `libg360r_plugin.so` — ~500 KB no total) ficam **embutidos direto no APK**.
-     - **Download sob demanda + Verificação SHA-256 para imagens `.bin` (~250 MB):** Como `smc200.bin` (266 MB) e `smr210.bin` (227 MB) são grandes demais para embutir no APK base, o assistente in-app baixa a imagem correspondente da GitHub Release oficial (ou aceita arquivo local), valida o hash SHA-256 e grava no cartão SD (via leitor USB-C OTG / `StorageAccessFramework`) junto com `fwupgrade.txt`.
-     - **Atualização OTA via Wi-Fi (Sem tirar o SD da câmera):** Uma vez com o mod ativo, futuras atualizações do daemon (`g360rd`), plugins (`libg360r_plugin.so`) ou até mesmo do firmware `.bin` são enviadas direto pelo app via Wi-Fi (`PUT /api/v1/debug/upload` com rate-limit seguro para o rádio Broadcom + `POST /api/v1/debug/restart`), sem precisar remover o cartão microSD da câmera.
-     - **Restauração 1-Click para Firmware Stock:** Opção no assistente para gravar a imagem original (`C200GLU0AQK1` ou `R210GLU0ARB2`) + `fwupgrade.txt` para reverter 100% ao estado de fábrica.
-   - **Modo Fallback Zero-Mod (Stock Firmware):** Cliente **Open Spherical Camera (OSC)** (`/osc/info`, `/osc/state`, `/osc/commands/execute` em `192.168.107.1:80` ou `192.168.43.1:80` no modo *Google Street View*) + cliente **UPnP/DLNA** (`:7676` SOAP, `:7679` stream, `:9001` files) para usuários com câmera 100% original sem SD preparado.
+2. **Conexão:** somente firmware original, por UPnP/SOAP (`:7676` controle, `:7679` stream, `:9001` arquivos), pelo menu "Connect to iOS" da câmera. Resultados e lista de ações: `docs/PLANO.md`, seção 13. O instalador de firmware e o OTA do commit `6f27c5c` foram removidos do app.
 
 3. **Base de Código:**
-   - Evolução direta sobre `simoneluconi/Revive360` (GPLv3), enriquecida com a matemática óptica/calibração de fábrica de `greg-randall/gear360-raw` (GPLv3), o parser `VROT`/TTTS de `teccheck/Gear360App` (GPLv3) e o cliente OSC de `arellaeast/gear360-revive` (MIT).
+   - Evolução direta sobre `simoneluconi/Revive360` (GPLv3), enriquecida com a matemática óptica/calibração de fábrica de `greg-randall/gear360-raw` (GPLv3), referência de formato de `teccheck/Gear360App` (sem licença: não copiar código) e o cliente OSC de `arellaeast/gear360-revive` (MIT). Ver `NOTICE.md`.
 
 ---
 
@@ -76,7 +79,7 @@ Cada unidade física da Gear 360 possui calibração de fábrica gravada na EEPR
 
 ---
 
-## 4. Roadmap de Implementação (Estilo Insta360)
+## 4. Roadmap de Implementação (Estilo Insta360) — histórico, substituído por `docs/PLANO.md`
 
 ```
 1. [Calibração OPAX/OPAI + Giroscópio `vrot`] -> verify: Testes unitários de parser EXIF/MP4 (`opax`, `opai`, `vrot`) + compilação limpa.

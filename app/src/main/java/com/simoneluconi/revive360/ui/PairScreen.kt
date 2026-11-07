@@ -26,7 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -185,9 +184,7 @@ fun PairScreen(replaceId: String? = null) {
 /** Which cameras work and what each one needs, before the user looks for one ([CameraModels]). */
 @Composable
 private fun BeforeYouStart() {
-    val nav = LocalActions.current
     val colors = LocalAppColors.current
-    val uri = LocalUriHandler.current
     Card {
         Label(stringResource(R.string.models_title), size = 13.sp, color = colors.text2, weight = FontWeight.Bold)
         CameraModels.all.forEach { model ->
@@ -200,13 +197,6 @@ private fun BeforeYouStart() {
                 else -> R.string.models_coming
             }
             Label(stringResource(need), size = 14.sp, color = colors.text2)
-        }
-        Spacer(Modifier.height(14.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillButton(stringResource(R.string.models_guide)) { uri.openUri(CameraModels.INSTALL_GUIDE) }
-            PillButton("Firmware & SD Manager", icon = AppIcons.SdCard, style = ButtonStyle.PRIMARY) {
-                nav.navigate(Screen.Firmware)
-            }
         }
     }
 }

@@ -9,7 +9,7 @@ import android.util.Size
 import com.simoneluconi.revive360.protocol.FileKind
 import java.io.File
 
-/** A picture or video the app saved on the phone (the "Revive360" folders of [MediaSaver]). */
+/** A picture or video the app saved on the phone (the "Gear360Alive" folders of [MediaSaver]). */
 data class PhoneItem(
     val uri: Uri,
     val name: String,

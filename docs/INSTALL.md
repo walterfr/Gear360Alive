@@ -1,3 +1,5 @@
+> **Warning: do not follow this guide for Gear360 Alive.** It comes from Revive360 and replaces the camera's firmware. Gear360 Alive runs on the original firmware: see [PLANO.md](PLANO.md).
+
 # Installing Revive360
 
 The same steps for the Gear 360 2016 (SM-C200) and the Gear 360 2017 (SM-R210). About half an

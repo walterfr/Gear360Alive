@@ -76,7 +76,7 @@ object Jpeg360 {
    GPano:CroppedAreaTopPixels="0"
    GPano:InitialViewHeadingDegrees="0"
    GPano:InitialViewPitchDegrees="${"%.1f".format(java.util.Locale.ROOT, pitchDeg)}"
-   GPano:StitchingSoftware="Revive360"/>
+   GPano:StitchingSoftware="Gear360 Alive"/>
  </rdf:RDF>
 </x:xmpmeta>
 <?xpacket end="w"?>""".toByteArray(Charsets.UTF_8)

@@ -231,7 +231,7 @@ object DngWriter {
         longs(278, height.toLong())
         longs(279, width.toLong() * height * 2)
         shorts(284, 1)
-        ascii(305, "Revive360")
+        ascii(305, "Gear360 Alive")
         shorts(33421, 2, 2)                        // CFARepeatPatternDim
         bytes(33422, 0, 1, 1, 2)                   // CFAPattern RGGB
         bytes(50706, 1, 4, 0, 0)                   // DNGVersion
