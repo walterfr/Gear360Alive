@@ -42,7 +42,24 @@ data class DualFisheye(
     val vignettePower: Float = C200_VIGNETTE_POWER,
     /** Whether to radially inpaint the south-pole nadir (`d.y < -0.88`) to hide tripod legs. */
     val nadirPatch: Boolean = false,
+    /**
+     * The lens's real curve, when known: distance from the circle's centre (fraction of a half's
+     * side) as a polynomial in (theta - 90 degrees), lowest power first. Empty: equidistant.
+     */
+    val lensPoly: List<Float> = emptyList(),
 ) {
+    /** [radius]'s coefficients, for the shaders: always six. */
+    fun polyCoefficients(): FloatArray {
+        if (lensPoly.isNotEmpty()) return FloatArray(POLY_SIZE) { lensPoly.getOrElse(it) { 0f } }
+        return floatArrayOf(focal * (PI.toFloat() / 2f), focal, 0f, 0f, 0f, 0f)
+    }
+
+    /** Where a point [theta] off the lens axis lands: distance from the centre, as a fraction of a side. */
+    fun radius(theta: Float): Float {
+        val t = theta - PI.toFloat() / 2f
+        return polyCoefficients().foldRight(0f) { coefficient, sum -> sum * t + coefficient }
+    }
+
     /** What a lens pixel at [theta] is multiplied by to undo the fall-off. */
     fun vignetteGain(theta: Float): Float =
         exp(vignetteStrength * (min(theta, maxTheta) / (PI.toFloat() / 2f)).pow(vignettePower))
@@ -51,6 +68,8 @@ data class DualFisheye(
     fun backMatrix(): FloatArray = Mat3.multiply(Mat3.rotation(backYaw, backPitch, backRoll), Mat3.rotation(PI.toFloat(), 0f, 0f))
 
     companion object {
+        const val POLY_SIZE = 6
+
         /**
          * The C200's lenses: 97.5 degrees off the axis lands 0.503 of a side from the centre (both
          * circles overflow their squares a little). Fitted on matched features of the overlap of
@@ -167,7 +186,7 @@ object LensGains {
     private fun lensPixel(model: DualFisheye, x: Float, y: Float, z: Float, cx: Float, cy: Float, side: Int): Pair<Int, Int>? {
         val theta = acos(z.coerceIn(-1f, 1f))
         if (theta > model.maxTheta) return null
-        val r = model.focal * side * theta
+        val r = model.radius(theta) * side
         val len = hypot(x, y)
         val px = cx * side + if (len > 1e-6f) r * x / len else 0f
         val py = cy * side - if (len > 1e-6f) r * y / len else 0f
@@ -189,6 +208,7 @@ object SphereShader {
 uniform sampler2D uFront;
 uniform sampler2D uBack;
 uniform float uFocal;
+uniform float uPoly[6];
 uniform vec4 uCenters;
 uniform mat3 uBackRot;
 uniform float uMaxTheta;
@@ -205,12 +225,17 @@ const float WIDE = 0.16;
 
 // Where direction v (lens frame) lands in the lens texture, the gain undoing the fall-off there,
 // and how far (radians) it is from the edge of what the lens sees: negative outside
+float lensRadius(float th) {
+    float t = th - 1.57079633;
+    return uPoly[0] + t * (uPoly[1] + t * (uPoly[2] + t * (uPoly[3] + t * (uPoly[4] + t * uPoly[5]))));
+}
+
 float lensPoint(vec3 v, vec2 center, out vec2 uv, out float vignette) {
     float th = acos(clamp(v.z, -1.0, 1.0));
     vignette = exp(uVignette.x * pow(min(th, uMaxTheta) / 1.57079633, uVignette.y));
     float len = length(v.xy);
     vec2 dir = len > 1e-6 ? v.xy / len : vec2(1.0, 0.0);
-    uv = center + uFocal * th * vec2(dir.x, -dir.y);
+    uv = center + lensRadius(th) * vec2(dir.x, -dir.y);
     float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)) / uFocal;
     return min(uMaxTheta - th, edge);
 }
@@ -238,11 +263,9 @@ vec3 rawSphereColor(vec3 d) {
     vec3 b5 = textureLod(uBack, uvB, 5.0).rgb * gB;
     float t = mF - mB;
     float overlap = mF + mB;
-    // Narrow seam in lower hemisphere (d.y < -0.35) for Invisible Selfie Stick cut
-    float stickFactor = mix(1.0, 0.28, smoothstep(-0.35, -0.80, d.y));
-    vec3 hi = mix(b0 - b2, f0 - f2, weight(t, NARROW * stickFactor, overlap));
-    vec3 mid = mix(b2 - b5, f2 - f5, weight(t, MID * stickFactor, overlap));
-    vec3 lo = mix(b5, f5, weight(t, WIDE * stickFactor, overlap));
+    vec3 hi = mix(b0 - b2, f0 - f2, weight(t, NARROW, overlap));
+    vec3 mid = mix(b2 - b5, f2 - f5, weight(t, MID, overlap));
+    vec3 lo = mix(b5, f5, weight(t, WIDE, overlap));
     return clamp(lo + mid + hi, 0.0, 1.0);
 }
 

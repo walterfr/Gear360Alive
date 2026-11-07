@@ -89,6 +89,15 @@ fun PhoneGallery(modifier: Modifier = Modifier) {
     }
 }
 
+/** Sends a saved file to another app: Google Photos, YouTube, a chat. The user picks which, and nothing else leaves. */
+fun shareItem(context: Context, item: PhoneItem) {
+    val send = Intent(Intent.ACTION_SEND)
+        .setType(if (item.kind == FileKind.VIDEO) "video/mp4" else "image/jpeg")
+        .putExtra(Intent.EXTRA_STREAM, item.uri)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    runCatching { context.startActivity(Intent.createChooser(send, item.name)) }
+}
+
 /** A camera photo that is not 2:1 used one lens (`SAM_0299.JPG`, 2304x1296): the 360 viewer can't open it. */
 private fun isOneLensPhoto(context: Context, item: PhoneItem): Boolean {
     if (item.kind != FileKind.PHOTO) return false

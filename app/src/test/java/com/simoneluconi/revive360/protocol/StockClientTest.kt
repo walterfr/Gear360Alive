@@ -4,7 +4,9 @@ import com.sun.net.httpserver.HttpServer
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URL
+import java.util.Collections
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,8 +16,13 @@ import org.junit.Test
 
 class StockClientTest {
     private fun resource(name: String) = javaClass.getResource("/stock/$name")!!.readText()
-    private val requests = mutableListOf<String>()
+    private val requests: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val bodies: MutableList<String> = Collections.synchronizedList(mutableListOf())
     private var server: HttpServer? = null
+    private var giveSid = true
+    private var infoStatus = 200
+    private var notifyAnswer: String? = null
+    private val live = "TTTS".toByteArray() + ByteArray(5000) { it.toByte() }
 
     /** A camera on port [StockClient]'s client is redirected to, answering [firstDescriptions] before 200. */
     private fun client(firstDescriptions: List<Int> = emptyList()): StockClient {
@@ -23,13 +30,31 @@ class StockClientTest {
         val http = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         http.createContext("/") { exchange ->
             val soap = exchange.requestHeaders.getFirst("SOAPACTION")?.substringAfter('#')?.trim('"')
-            requests += "${exchange.requestMethod} ${exchange.requestURI.path} ${soap.orEmpty()}".trim()
-            val body = when (soap) {
-                "X_GetSettingInformation" -> resource("settings.xml")
-                "X_GetStorage" -> resource("storage.xml")
+            val sid = exchange.requestHeaders.getFirst("SID")
+            requests += "${exchange.requestMethod} ${exchange.requestURI.path} ${soap ?: sid.orEmpty()}".trim()
+            bodies += exchange.requestBody.readBytes().decodeToString()
+            if (exchange.requestMethod == "SUBSCRIBE") {
+                val callback = exchange.requestHeaders.getFirst("CALLBACK")!!.trim('<', '>').removePrefix("http://")
+                val (address, path) = callback.split("/", limit = 2)
+                Socket(address.substringBefore(':'), address.substringAfter(':').toInt()).use { s ->
+                    s.getOutputStream().write("NOTIFY /$path HTTP/1.1\r\nContent-Length: 3\r\n\r\nabc".toByteArray())
+                    notifyAnswer = s.getInputStream().bufferedReader().readLine()
+                }
+                if (giveSid) exchange.responseHeaders.set("SID", "uuid:fake")
+            }
+            val body = when {
+                soap == "X_GetSettingInformation" -> resource("settings.xml")
+                soap == "X_GetStorage" -> resource("storage.xml")
+                soap == "GetInfomation" -> "<QualityHighUrl>http://x:7679/livestream_high.avi</QualityHighUrl>"
+                exchange.requestURI.path == "/livestream_high.avi" -> null
                 else -> ""
-            }.toByteArray()
-            val code = if (exchange.requestURI.path == "/smp_2_" && pending.isNotEmpty()) pending.removeAt(0) else 200
+            }?.toByteArray() ?: live
+            val code = when {
+                exchange.requestURI.path == "/smp_2_" && pending.isNotEmpty() -> pending.removeAt(0)
+                soap == "GetInfomation" -> infoStatus
+                body === live -> 206
+                else -> 200
+            }
             exchange.sendResponseHeaders(code, if (body.isEmpty()) -1 else body.size.toLong())
             if (body.isNotEmpty()) exchange.responseBody.use { it.write(body) }
             exchange.close()
@@ -37,9 +62,18 @@ class StockClientTest {
         http.start()
         server = http
         val port = http.address.port
-        return StockClient("127.0.0.1") { url ->
-            URL(url.toString().replace(":7676", ":$port")).openConnection() as HttpURLConnection
-        }
+        return StockClient(
+            "127.0.0.1",
+            { url -> URL(url.toString().replace(Regex(":76(76|79)"), ":$port")).openConnection() as HttpURLConnection },
+            eventPort = port,
+            callbackPort = 0,
+            settleMs = 0,
+        )
+    }
+
+    private fun waitFor(request: String) {
+        val until = System.currentTimeMillis() + 3_000
+        while (request !in requests && System.currentTimeMillis() < until) Thread.sleep(20)
     }
 
     @After
@@ -83,5 +117,43 @@ class StockClientTest {
     @Test
     fun theAllowedActionsAreOnlyQueries() {
         assertEquals(setOf("X_GetSettingInformation", "X_GetStorage"), StockQuery.entries.map { it.name }.toSet())
+        assertEquals(listOf("SetOperationState", "GetInfomation"), StockSessionAction.entries.map { it.name })
+    }
+
+    @Test
+    fun opensTheLiveViewInTheTestedOrderAndEndsTheSession() {
+        val stream = client().openLive()
+        assertTrue(stream.input.readBytes().contentEquals(live))
+        assertEquals("HTTP/1.1 200 OK", notifyAnswer)
+        assertEquals(
+            listOf(
+                "GET /smp_2_",
+                "SUBSCRIBE /smp_5_",
+                "POST /smp_4_ SetOperationState",
+                "POST /smp_4_ GetInfomation",
+                "GET /livestream_high.avi",
+            ),
+            requests.toList(),
+        )
+        assertTrue(bodies[2].contains("<StateEvent>changeToRVF</StateEvent>"))
+        assertFalse(bodies[3].contains("GPSINFO"))
+        stream.close()
+        waitFor("UNSUBSCRIBE /smp_5_ uuid:fake")
+        assertEquals("UNSUBSCRIBE /smp_5_ uuid:fake", requests.last())
+    }
+
+    @Test
+    fun withoutASubscriptionNothingElseIsSent() {
+        giveSid = false
+        assertThrows(IOException::class.java) { client().openLive() }
+        assertEquals(listOf("GET /smp_2_", "SUBSCRIBE /smp_5_"), requests.toList())
+    }
+
+    @Test
+    fun aFailedStepStillEndsTheSessionAndOpensNoStream() {
+        infoStatus = 500
+        assertThrows(IOException::class.java) { client().openLive() }
+        assertTrue(requests.none { it.contains("livestream") })
+        assertEquals("UNSUBSCRIBE /smp_5_ uuid:fake", requests.last())
     }
 }

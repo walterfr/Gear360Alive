@@ -107,6 +107,7 @@ class OesSphereRenderer(var model: DualFisheye = DualFisheye(), var nadirPatch: 
         GLES30.glUniform1i(GLES30.glGetUniformLocation(prog, "uTex"), 0)
         GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(prog, "uTexMatrix"), 1, false, texMatrix, 0)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(prog, "uFocal"), model.focal)
+        GLES30.glUniform1fv(GLES30.glGetUniformLocation(prog, "uPoly"), DualFisheye.POLY_SIZE, model.polyCoefficients(), 0)
         GLES30.glUniform4f(
             GLES30.glGetUniformLocation(prog, "uCenters"),
             model.frontCenterX, model.frontCenterY, model.backCenterX, model.backCenterY,
@@ -124,6 +125,7 @@ precision highp float;
 uniform samplerExternalOES uTex;
 uniform mat4 uTexMatrix;
 uniform float uFocal;
+uniform float uPoly[6];
 uniform vec4 uCenters;
 uniform mat3 uBackRot;
 uniform float uMaxTheta;
@@ -136,12 +138,34 @@ vec3 sampleHalf(vec2 uv, float halfIdx) {
     return texture(uTex, tUv).rgb;
 }
 
+// Nine taps over about 2% of a lens: the colour around a point, without the other lens's half
+vec3 blurHalf(vec2 uv, float halfIdx) {
+    const float R = 0.02;
+    const float D = 0.01414;
+    vec3 sum = sampleHalf(uv, halfIdx);
+    sum += sampleHalf(clamp(uv + vec2(R, 0.0), 0.0, 1.0), halfIdx);
+    sum += sampleHalf(clamp(uv - vec2(R, 0.0), 0.0, 1.0), halfIdx);
+    sum += sampleHalf(clamp(uv + vec2(0.0, R), 0.0, 1.0), halfIdx);
+    sum += sampleHalf(clamp(uv - vec2(0.0, R), 0.0, 1.0), halfIdx);
+    sum += sampleHalf(clamp(uv + vec2(D, D), 0.0, 1.0), halfIdx);
+    sum += sampleHalf(clamp(uv - vec2(D, D), 0.0, 1.0), halfIdx);
+    sum += sampleHalf(clamp(uv + vec2(D, -D), 0.0, 1.0), halfIdx);
+    sum += sampleHalf(clamp(uv - vec2(D, -D), 0.0, 1.0), halfIdx);
+    return sum / 9.0;
+}
+
+float seamWeight(float t, float width, float overlap) {
+    return clamp(0.5 + t / (2.0 * min(width, overlap)), 0.0, 1.0);
+}
+
 float lensPointOes(vec3 v, vec2 center, out vec2 uv, out float vignette) {
     float th = acos(clamp(v.z, -1.0, 1.0));
     vignette = exp(uVignette.x * pow(min(th, uMaxTheta) / 1.57079633, uVignette.y));
     float len = length(v.xy);
     vec2 dir = len > 1e-6 ? v.xy / len : vec2(1.0, 0.0);
-    uv = center + uFocal * th * vec2(dir.x, -dir.y);
+    float t = th - 1.57079633;
+    float radius = uPoly[0] + t * (uPoly[1] + t * (uPoly[2] + t * (uPoly[3] + t * (uPoly[4] + t * uPoly[5]))));
+    uv = center + radius * vec2(dir.x, -dir.y);
     float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)) / uFocal;
     return min(uMaxTheta - th, edge);
 }
@@ -157,10 +181,15 @@ vec3 rawSphereColorOes(vec3 d) {
     if (mF <= 0.0) return clamp(sampleHalf(uvB, 1.0) * vB, 0.0, 1.0);
     vec3 f = sampleHalf(uvF, 0.0) * vF;
     vec3 b = sampleHalf(uvB, 1.0) * vB;
-    // Narrow the seam in the lower hemisphere (d.y < -0.35) for Invisible Selfie Stick / Nadir clean cut
-    float seamHalf = mix(0.08, 0.018, smoothstep(-0.35, -0.80, d.y));
-    float w = smoothstep(-seamHalf, seamHalf, mF - mB);
-    return clamp(mix(b, f, w), 0.0, 1.0);
+    vec3 fLow = blurHalf(uvF, 0.0) * vF;
+    vec3 bLow = blurHalf(uvB, 1.0) * vB;
+    // As SphereShader: fine detail over a narrow band (no ghosting), broad shading over a wide one
+    // (no visible step). A video frame has no mipmaps, so the broad band comes from blurHalf.
+    float t = mF - mB;
+    float overlap = mF + mB;
+    vec3 detail = mix(b - bLow, f - fLow, seamWeight(t, 0.035, overlap));
+    vec3 shading = mix(bLow, fLow, seamWeight(t, 0.16, overlap));
+    return clamp(shading + detail, 0.0, 1.0);
 }
 
 vec3 sphereColorOes(vec3 d) {
@@ -258,6 +287,11 @@ class SphereVideoView(
     /** True while the user's finger is touching/dragging the sphere, or after manual drag until resumed. */
     @Volatile var userInteracting: Boolean = false
     @Volatile var manualOverride: Boolean = false
+    /** For pictures drawn on [currentSurface] with a Canvas: its buffer is 1x1 until sized. */
+    fun setSourceSize(width: Int, height: Int) {
+        surfaceTexture?.setDefaultBufferSize(width, height)
+    }
+
     @Volatile var rawMode: Boolean = false
         set(value) {
             field = value

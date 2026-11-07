@@ -27,7 +27,32 @@ object MediaImporter {
     /** Same name and size: the file the camera numbered is already here. */
     fun isDuplicate(name: String, size: Long, existing: List<Pair<String, Long>>): Boolean = name to size in existing
 
-    // ponytail: runs in the screen's scope, so leaving Home stops it between files; a service if long imports need it
+    /** Every photo and video under a folder the user picked, its subfolders included, sorted by name. */
+    fun filesIn(context: Context, tree: Uri): List<Uri> {
+        val found = ArrayList<Pair<String, Uri>>()
+
+        fun walk(documentId: String) {
+            val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, documentId)
+            val columns = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+            )
+            context.contentResolver.query(children, columns, null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getString(0)
+                    val name = c.getString(1) ?: continue
+                    when {
+                        c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR -> walk(id)
+                        kindOf(name) != null -> found += name to DocumentsContract.buildDocumentUriUsingTree(tree, id)
+                    }
+                }
+            }
+        }
+        walk(DocumentsContract.getTreeDocumentId(tree))
+        return found.sortedBy { it.first }.map { it.second }
+    }
+
     suspend fun import(context: Context, uris: List<Uri>, progress: (Int) -> Unit): Result {
         val existing = PhoneMedia.list(context).map { it.name to it.size }.toMutableList()
         var imported = 0

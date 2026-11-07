@@ -1,5 +1,8 @@
 package com.simoneluconi.revive360.media
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Rect
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
@@ -16,7 +19,8 @@ import java.nio.ByteBuffer
  * Plays the camera's live view (protocol §5.14) onto a [Surface]. The C200/R210 send Samsung's TTTS
  * stream: a header (`TTTS`, `VID0` with the size, `AUD0`, then `LIST`/`movi`), then chunks of
  * `id(4) size(4, big-endian) timestamp(8) data(size)`; video chunks (`00VD`) hold one HEVC access
- * unit in Annex B form, the first with its VPS/SPS/PPS; gyro chunks (`00VR`) hold 3 rational pairs
+ * unit in Annex B form, the first with its VPS/SPS/PPS, or, on the SM-R210's livestream_high.avi, one
+ * JPEG (1280x640 at about 15 fps, timestamps 8008 apart); gyro chunks (`00VR`) hold 3 rational pairs
  * `(pitch, roll, yaw)` in degrees. Each frame is shown as soon as it decodes: a preview, not a recording.
  *
  * [run] blocks reading the stream; closing the stream ends it.
@@ -34,6 +38,7 @@ class LiveViewDecoder(
     private val onFrame: (Long) -> Unit,
 ) {
     private var codec: MediaCodec? = null
+    private var bitmap: Bitmap? = null
     private var frames = 0L
     // Falling behind: the camera's timeline against the phone's clock
     private var anchorWall = 0L
@@ -53,9 +58,12 @@ class LiveViewDecoder(
                 if (size < 0 || size > MAX_CHUNK) throw IllegalStateException("chunk of $size bytes")
                 val payload = ByteArray(size).also { data.readFully(it) }
                 when (String(id, Charsets.US_ASCII)) {
-                    VIDEO_CHUNK -> {
-                        onAccessUnit(payload)
-                        if (!behind(payload, timestamp)) video(payload, timestamp, width, height)
+                    VIDEO_CHUNK -> when {
+                        isJpeg(payload) -> jpeg(payload)
+                        else -> {
+                            onAccessUnit(payload)
+                            if (!behind(payload, timestamp)) video(payload, timestamp, width, height)
+                        }
                     }
                     GYRO_CHUNK -> CameraMetadata.parseLiveVrotChunk(payload, timestamp)?.let(onGyro)
                 }
@@ -111,6 +119,25 @@ class LiveViewDecoder(
         return box.getInt(vid + 16) to box.getInt(vid + 20)
     }
 
+    /** The SM-R210's livestream_high.avi: one JPEG per video chunk, drawn as it comes. */
+    private fun jpeg(data: ByteArray) {
+        val options = BitmapFactory.Options().apply {
+            inMutable = true
+            inBitmap = bitmap
+        }
+        val frame = runCatching { BitmapFactory.decodeByteArray(data, 0, data.size, options) }.getOrNull()
+            ?: BitmapFactory.decodeByteArray(data, 0, data.size)
+            ?: return
+        bitmap = frame
+        val canvas = surface.lockHardwareCanvas()
+        try {
+            canvas.drawBitmap(frame, null, Rect(0, 0, canvas.width, canvas.height), null)
+        } finally {
+            surface.unlockCanvasAndPost(canvas)
+        }
+        onFrame(++frames)
+    }
+
     private fun video(au: ByteArray, timestamp: Long, width: Int, height: Int) {
         val codec = codec ?: start(au, width, height) ?: return
         val inIndex = codec.dequeueInputBuffer(INPUT_WAIT_US)
@@ -159,6 +186,10 @@ class LiveViewDecoder(
         private const val NAL_VPS = 32
         private const val NAL_SPS = 33
         private const val NAL_PPS = 34
+
+        /** A JPEG picture (SOI marker) instead of an HEVC access unit */
+        fun isJpeg(data: ByteArray): Boolean =
+            data.size > 2 && data[0] == 0xFF.toByte() && data[1] == 0xD8.toByte() && data[2] == 0xFF.toByte()
 
         /** An access unit that starts with its parameter sets: a key frame (the camera's IDR) */
         fun isKeyFrame(au: ByteArray): Boolean {

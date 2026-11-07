@@ -93,7 +93,7 @@ fun LiveViewScreen() {
     val linkState by nav.app.controller.state.collectAsStateWithLifecycle()
     val isR210 = (linkState as? LinkState.Connected)?.info?.model?.contains("R210", ignoreCase = true) == true
     val liveModel = remember(isR210) {
-        if (isR210) DualFisheye(focal = CameraMetadata.R210_FOCAL) else DualFisheye()
+        if (isR210) DualFisheye(focal = CameraMetadata.R210_FOCAL, lensPoly = CameraMetadata.R210_POLY) else DualFisheye()
     }
     val handled = remember { intArrayOf(0) }
     var full by rememberSaveable { mutableStateOf(false) }

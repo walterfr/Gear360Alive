@@ -298,8 +298,8 @@ object DeepTracker360 {
             val len = hypot(dx, dy)
             val dirX = if (len > 1e-6f) dx / len else 1f
             val dirY = if (len > 1e-6f) dy / len else 0f
-            val u = (model.frontCenterX + model.focal * th * dirX).coerceIn(0f, 0.999f)
-            val v = (model.frontCenterY - model.focal * th * dirY).coerceIn(0f, 0.999f)
+            val u = (model.frontCenterX + model.radius(th) * dirX).coerceIn(0f, 0.999f)
+            val v = (model.frontCenterY - model.radius(th) * dirY).coerceIn(0f, 0.999f)
             val ix = (u * halfW).toInt().coerceIn(0, halfW - 1)
             val iy = (v * height).toInt().coerceIn(0, height - 1)
             pixels[iy * width + ix]
@@ -309,8 +309,8 @@ object DeepTracker360 {
             val len = hypot(b[0], b[1])
             val dirX = if (len > 1e-6f) b[0] / len else 1f
             val dirY = if (len > 1e-6f) b[1] / len else 0f
-            val u = (model.backCenterX + model.focal * th * dirX).coerceIn(0f, 0.999f)
-            val v = (model.backCenterY - model.focal * th * dirY).coerceIn(0f, 0.999f)
+            val u = (model.backCenterX + model.radius(th) * dirX).coerceIn(0f, 0.999f)
+            val v = (model.backCenterY - model.radius(th) * dirY).coerceIn(0f, 0.999f)
             val ix = halfW + (u * halfW).toInt().coerceIn(0, halfW - 1)
             val iy = (v * height).toInt().coerceIn(0, height - 1)
             pixels[iy * width + ix.coerceIn(0, width - 1)]

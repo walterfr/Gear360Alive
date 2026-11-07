@@ -2,72 +2,74 @@ package com.simoneluconi.revive360.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.simoneluconi.revive360.R
-import com.simoneluconi.revive360.link.TransferService
-import com.simoneluconi.revive360.media.MediaImporter
+import com.simoneluconi.revive360.media.ImportState
 import com.simoneluconi.revive360.ui.theme.LocalAppColors
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /** Brings files in from a card reader or a folder, and opens what is already on the device. */
 @Composable
 fun ImportCard() {
     val nav = LocalActions.current
-    val context = LocalContext.current
-    val resources = LocalResources.current
     val colors = LocalAppColors.current
-    val scope = rememberCoroutineScope()
-    var total by remember { mutableIntStateOf(0) }
-    var current by remember { mutableIntStateOf(0) }
-    var running by remember { mutableStateOf(false) }
+    val imports = nav.app.imports
+    val state by imports.state.collectAsStateWithLifecycle()
+    val running = state is ImportState.Running
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        total = uris.size
-        current = 0
-        running = true
-        TransferService.set(context, true)
-        scope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) { MediaImporter.import(context, uris) { current = it } }
-                nav.message(
-                    resources.getString(R.string.import_done, result.imported, result.alreadyHere, result.skipped, result.failed),
-                    if (result.failed == 0) MessageKind.GOOD else MessageKind.BAD,
-                )
-            } finally {
-                running = false
-                TransferService.set(context, false)
-            }
-        }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) imports.importFiles(uris)
+    }
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree != null) imports.importFolder(tree)
     }
 
     Card {
         Label(stringResource(R.string.import_text), color = colors.text2)
         Spacer(Modifier.height(14.dp))
-        PillButton(
-            if (running) stringResource(R.string.import_running, current, total) else stringResource(R.string.import_action),
-            Modifier.fillMaxWidth(),
-            icon = AppIcons.SdCard,
-            style = ButtonStyle.PRIMARY,
-            enabled = !running,
-        ) { picker.launch(arrayOf("image/jpeg", "video/mp4")) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PillButton(
+                stringResource(R.string.import_action),
+                Modifier.weight(1f),
+                icon = AppIcons.Photo,
+                style = ButtonStyle.PRIMARY,
+                enabled = !running,
+            ) { filePicker.launch(arrayOf("image/jpeg", "video/mp4")) }
+            PillButton(
+                stringResource(R.string.import_folder),
+                Modifier.weight(1f),
+                icon = AppIcons.SdCard,
+                style = ButtonStyle.PRIMARY,
+                enabled = !running,
+            ) { folderPicker.launch(null) }
+        }
+        val current = state
+        val status = when (current) {
+            ImportState.Idle -> null
+            is ImportState.Running ->
+                if (current.total == 0) stringResource(R.string.import_listing)
+                else stringResource(R.string.import_running, current.current, current.total)
+            is ImportState.Done -> with(current.result) {
+                stringResource(R.string.import_done, imported, alreadyHere, skipped, failed)
+            }
+            ImportState.Failed -> stringResource(R.string.import_failed)
+        }
+        if (status != null) {
+            Spacer(Modifier.height(12.dp))
+            val bad = current is ImportState.Failed || (current as? ImportState.Done)?.result?.failed?.let { it > 0 } == true
+            Label(status, size = 14.sp, color = if (bad) colors.bad else colors.text2)
+        }
     }
     Card(padding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)) {
         SettingRow(

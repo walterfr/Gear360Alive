@@ -33,8 +33,20 @@ object CameraMetadata {
     /** C200 reference half-side in pixels used by the EEPROM OPAX parameters (scaled ×10). */
     private const val C200_OPAX_SIDE = 3888f
 
-    /** R210 default focal length (equidistant approximation of OCamCalib polynomial). */
-    val R210_FOCAL = (0.985 * 0.5 / Math.toRadians(97.5)).toFloat()
+    /**
+     * The SM-R210's real lens curve: the camera firmware's OCamCalib polynomial, as documented by
+     * greg-randall/gear360-raw (GPL-3.0), scaled from its 2048-pixel lens square to a fraction of a side.
+     * At 90 degrees it lands about 58 pixels of 2896 away from the equidistant model used before.
+     */
+    val R210_POLY: List<Float> = listOf(
+        971.9375896974, 526.1058092068, -499.094003808, -645.9034011167, -336.1369527907, -65.8206694527,
+    ).map { (it / 2048.0).toFloat() }
+
+    /** How fast the R210's image moves around 90 degrees, a fraction of a side per radian. */
+    val R210_FOCAL = R210_POLY[1]
+
+    /** The part of each factory `Diff` value that best matched real SM-R210 photos (docs/PLANO.md). */
+    private const val R210_DIFF_SCALE = 0.5f
 
     /**
      * Reads factory [DualFisheye] calibration from a JPEG or MP4 [file], falling back to [defaultModel].
@@ -211,6 +223,8 @@ object CameraMetadata {
             val leftCy = buf.getDouble(offset + 2 * 8).toFloat()
             val rightCx = buf.getDouble(offset + 3 * 8).toFloat()
             val rightCy = buf.getDouble(offset + 4 * 8).toFloat()
+            val leftRadius = buf.getDouble(offset + 5 * 8).toFloat()
+            val rightRadius = buf.getDouble(offset + 6 * 8).toFloat()
             val diffX = buf.getDouble(offset + 13 * 8).toFloat()
             val diffY = buf.getDouble(offset + 14 * 8).toFloat()
             val diffRollDeg = buf.getDouble(offset + 15 * 8).toFloat()
@@ -218,16 +232,19 @@ object CameraMetadata {
                 rightCx !in 1000f..2000f || rightCy !in 1000f..2000f
             ) return null
             val focalPx = R210_OPAX_SIDE * R210_FOCAL
-            return base.copy(
+            val model = base.copy(
                 focal = R210_FOCAL,
+                lensPoly = R210_POLY,
                 frontCenterX = leftCx / R210_OPAX_SIDE,
                 frontCenterY = leftCy / R210_OPAX_SIDE,
                 backCenterX = rightCx / R210_OPAX_SIDE,
                 backCenterY = rightCy / R210_OPAX_SIDE,
-                backYaw = atan2(diffX, focalPx).coerceIn(-0.15f, 0.15f),
-                backPitch = atan2(diffY, focalPx).coerceIn(-0.15f, 0.15f),
-                backRoll = Math.toRadians(diffRollDeg.toDouble()).toFloat().coerceIn(-0.25f, 0.25f),
+                backYaw = (-R210_DIFF_SCALE * atan2(diffX, focalPx)).coerceIn(-0.15f, 0.15f),
+                backPitch = (-R210_DIFF_SCALE * atan2(diffY, focalPx)).coerceIn(-0.15f, 0.15f),
+                backRoll = (R210_DIFF_SCALE * Math.toRadians(diffRollDeg.toDouble()).toFloat()).coerceIn(-0.25f, 0.25f),
             )
+            val circle = minOf(leftRadius, rightRadius) / R210_OPAX_SIDE
+            return model.copy(maxTheta = thetaAtRadius(model, circle))
         }
 
         // C200 format: 40× int32 LE; symmetric lens blocks at indices 8..20 (front) and 21..33 (back)
@@ -255,6 +272,18 @@ object CameraMetadata {
             )
         }
         return null
+    }
+
+    /** The angle off the axis that lands on the image circle: past it a lens sees only black. */
+    private fun thetaAtRadius(model: DualFisheye, radius: Float): Float {
+        var low = Math.toRadians(80.0).toFloat()
+        var high = Math.toRadians(101.0).toFloat()
+        if (radius <= 0f || radius >= model.radius(high)) return high
+        repeat(24) {
+            val middle = (low + high) / 2f
+            if (model.radius(middle) < radius) low = middle else high = middle
+        }
+        return low
     }
 
     private fun readMp4Calibration(file: File, defaultModel: DualFisheye): DualFisheye {

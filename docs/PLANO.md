@@ -350,7 +350,94 @@ Um único `Shot` com `GPSINFO` vazio, às 00:26, em modo Photo. Sem resposta em 
 
 **Depois do reinício e de reativar Connect to iOS (00:31-00:32):** Wi-Fi, ping e portas 7676, 7679 e 9001 ativos, mas GET em `/smp_2_` deu timeout e SSDP não teve resposta. O serviço de controle **ainda não foi confirmado de volta**. Sem comandos enviados além de leitura.
 
-Hipóteses, nenhuma testada: falta `SetOperationState` com `changeToRVF` antes, como no log do app Samsung; `GPSINFO` vazio; ou `Shot` responde só depois de um evento que o cliente não ouve. **`Shot` fica suspenso** até entender a causa.
+**`Shot` fica suspenso** até entender a causa.
+
+**Sequência real do app oficial** (log de um C200 em `gear360reveng`; falta confirmar no R210):
+
+1. `GET /smp_2_`: o primeiro responde `503`, o segundo `200`. Portanto o `503` é parte do fluxo normal.
+2. `GET /smp_3_` e listas de ações.
+3. `SUBSCRIBE` com um endereço de retorno no cliente (`http://<cliente>:8059/evetSub`), gerando `EVT_RVF_ML_SUBSCRIBE_START`.
+4. `SetOperationState` com `changeToRVF`.
+5. `GetInfomation`, gerando `EVT_RVF_VIEWERFOUND`.
+6. Só então os comandos: `StartRecord`, `StopRecord`, `SetStreamQuality` etc.
+7. `UNSUBSCRIBE` encerra (`EVT_RVF_ML_APP_CLOSE`).
+
+Nosso `Shot` pulou os passos 3 a 5, o que é agora a hipótese principal do travamento. Não há `Shot` nesse log. Hipóteses secundárias: `GPSINFO` vazio; falta de quem receba eventos. O passo 3 pode também explicar o `Browse` vazio, junto com `changeToML`. Próximos testes, cada um com aprovação: 3, depois 4, depois 5, com checagem de saúde e `UNSUBSCRIBE` ao final.
+
+`X_SetControllerInformation` devolve `FotaUrlValue`, um campo de atualização de firmware: segue bloqueada.
+
+### `SUBSCRIBE`, 2026-11-07: funciona no R210
+
+Um único `SUBSCRIBE` em `/smp_5_` e um `UNSUBSCRIBE`, com `tools/stock_probe/session_step.py --send` (relatório local `session-subscribe-20261107-151510.json`).
+
+- `SUBSCRIBE`: `200`, com SID e `TIMEOUT: Second-300` aceito.
+- `NOTIFY` chegou ao PC: um, `SEQ 0`, com `OperationState=IDLE`, os demais campos `NULL`. Portanto o firewall deixou passar e o passo 3 da sequência vale no R210.
+- Eventos declarados incluem `RVF_LAST_PHOTO_URL_VALUE`, `RVF_BUTTON_ACTION`, `RVF_BATTERY_LEVEL_VALUE` e `RVF_DEVICE_ERROR_STATUS`.
+- `/smp_2_` respondeu durante a assinatura.
+- `UNSUBSCRIBE`: `200`. Logo depois, 7676, 7679 e 9001 fecharam por cerca de 1 min (falhas até 15:16:06, abertas às 15:16:24), com o Wi-Fi conectado. Voltaram sozinhas, e `/smp_2_` respondeu. Causa não confirmada; o evento `EVT_RVF_ML_APP_CLOSE` é a hipótese. O app deve esperar esse intervalo depois de encerrar a sessão.
+
+No log da C200, `UNSUBSCRIBE` (581,36 s) gera `EVT_RVF_ML_APP_CLOSE` (582,27 s), seguido de troca de modo do Wi-Fi. O log não tem `changeToML` em nenhum ponto: lá, o encerramento é só o `UNSUBSCRIBE`. Falta confirmar no R210.
+
+Na C200, `changeToRVF` responde em milissegundos, sai do menu da tela da câmera (`E_SLCD_EXCEPT_EVENT_EXIT_MENU`) e gera `SYSEVT_CAMERA_RVF_ML_CHANGE_DONE`. O stream só começa com um GET próprio.
+
+### `changeToRVF`, 2026-11-07: funciona no R210
+
+Um único `SetOperationState` com `changeToRVF`, 3 s depois do `SUBSCRIBE`, com a câmera no carregador e em modo Video (`session_step.py --step rvf --send`; relatório local `session-rvf-20261107-152141.json`).
+
+- Resposta: `200` em 0,04 s, com `ChargingStatus=Erase` e `DeviceName=smr210`.
+- `/smp_2_` respondeu 15 s depois do comando.
+- `NOTIFY`: 5. O primeiro traz `OperationState=IDLE` e bateria 45; os demais, só bateria (46) e `RVF_CHARGING_STATUS`. Nenhum `NOTIFY` mudou `OperationState`.
+- `RVF_CHARGING_STATUS` alternou entre `Erase` e `Off` no carregador, enquanto a bateria subia de 45 para 47. Significado não confirmado; parece só estado de carga, apesar do nome. Espaço livre (57378) e usado (3557) não mudaram.
+- `UNSUBSCRIBE`: conexão fechada sem resposta (`RemoteDisconnected`). A câmera respondeu de novo depois de 50 s. Sem confirmação de que a assinatura foi encerrada; ela expira em 300 s.
+- Estado depois: igual ao de antes, exceto bateria. `DeviceStatus` já era `LiveView` antes do comando, então não indica o efeito dele.
+
+Ressalva sobre o log da C200: a câmera estava gravando vídeo durante aquela sessão (tempo de gravação 274 s logo depois de `GetInfomation`). Logo, ele não mostra o comportamento em repouso.
+
+`GPSINFO`: no APK, `Shot` não preenche esse argumento no método do disparo, o que enfraquece a hipótese de que `GPSINFO` vazio travou o `Shot`. `GetInfomation` o preenche no APK, mas a lista de ações do R210 não declara entrada nessa ação.
+
+Na C200, `GetInfomation` gera `EVT_RVF_VIEWERFOUND` e `SYSEVT_CAMERA_SET_GPS_INFO`.
+
+### `GetInfomation`, 2026-11-07: funciona no R210
+
+Um único `GetInfomation`, sem argumentos, 3 s depois de `changeToRVF`, em modo Video e no carregador (`session_step.py --step info --send`; relatório local `session-info-20261107-152603.json`). Resposta: `200` em 0,11 s, 6435 bytes.
+
+- **Stream**, porta 7679: `livestream_high.avi`, `livestream_recording.avi`, `livestream_bc_high.avi`, `livestream_bc_recording.avi`, `livestream_gearvr.avi`. Não abertos ainda.
+- **Calibração ao vivo:** `CalData` traz 20 inteiros de 64 bits, com os bits de `double`. Os campos 1 a 19 são idênticos aos do `opax` de um MP4 da câmera. Portanto o app pode obter a calibração sem baixar arquivo.
+- **Última mídia e contagem:** `LastFileURL` (`http://192.168.43.1:9001/mnt/mmc/DCIM/100PHOTO/360_0305.MP4`), `FileCount=19`, `RemainRecTime=15913`, `AVAILSHOTS=0` em modo Video.
+- **Opções e valores atuais:** modos, resoluções (duas lentes: até 4096x2048@24, 2560x1280@60, 1440x720@120), EV, ISO, WB, bipe, LED, desligamento automático (atual 5min), HDR, nitidez, timer, lente.
+- `OpaiData` começa com um identificador em texto; não copiar para documentos públicos.
+- Antes do comando, `/smp_2_` respondeu. `NOTIFY`: 2, sem mudança de `OperationState`. Estado depois igual, exceto bateria; espaço não mudou.
+- `UNSUBSCRIBE`: de novo `RemoteDisconnected`, nas duas sessões com `changeToRVF`, e `200` na sessão só com `SUBSCRIBE`. Câmera voltou em 50 s e 79,9 s.
+
+### Stream ao vivo, 2026-11-07: funciona no R210
+
+Um único `GET /livestream_high.avi` na porta 7679, depois de `SUBSCRIBE`, `changeToRVF` e `GetInfomation`, lido por 5 s e fechado sem `StopStreaming` (`session_step.py --step stream --send`; relatório local `session-stream-20261107-153126.json`). O script descartou o vídeo: só contagens.
+
+- Resposta: `206`, `video/x-avi`, primeiro byte em 0,91 s, cabeçalho `TTTS`.
+- `VID0`: **1280x640**, não 2560x1280. Taxa: 11,1 Mbps (6.967.842 bytes em 5 s). Câmera em modo Video.
+- Marcadores: `00VD` 76 vezes (cerca de 15 por segundo). **Nenhum `00AU` nem `00VR`** nesses 5 s. Portanto, este stream não confirma áudio nem giroscópio ao vivo; a seção 3.2 do `AGENTS.md` fica em aberto para o R210. Outros endereços ainda não foram testados.
+- A contagem é por busca de marcador, sem interpretar os blocos.
+- Imagem não decodificada; `LiveViewDecoder` ainda não foi testado com este stream.
+- Espaço usado e livre não mudaram. `/smp_2_` respondeu antes do `UNSUBSCRIBE`, que deu de novo `RemoteDisconnected`.
+- Câmera voltou em 106,8 s. Tempos nas sessões com `changeToRVF`: 50 s, 79,9 s, 106,8 s. Crescem, mas cada sessão fez mais que a anterior e são só três medidas.
+
+**Formato do stream, 2026-11-07 (relatório local `session-stream-20261107-194253.json`):** cabeçalho `TTTS` de 124 bytes até `movi`; blocos `id(4) tamanho(4, BE) timestamp(8, BE)`. Cada `00VD` traz **um JPEG** (`ffd8ffdb...`, cerca de 110 KB), **não HEVC**. Timestamps de 8008 em 8008 (relógio de 120 kHz), ou seja, 14,985 fps. Foi por isso que o primeiro teste no tablet ficou em tela preta: `LiveViewDecoder` esperava HEVC. Agora ele desenha JPEG na `Surface`. Câmera voltou em 42,9 s.
+
+**Preview no tablet, 2026-11-07: funciona.** Com `StockClient.openLive` e decodificação de JPEG, a imagem apareceu no Lenovo TB361FU. Atraso de cerca de 2 s e costura razoável em 360, segundo o dono. Depois de parar o preview, a câmera voltou a responder sozinha. Log do app ainda não lido (tablet fora do adb). A causa do atraso não foi medida: pode vir do buffer da câmera, da rede ou da decodificação.
+
+Relato do dono sobre esses testes: só a conexão da câmera com o PC caiu, várias vezes. Causa não confirmada; o relato não detalha tela nem LED.
+
+Próximos testes, cada um com aprovação: decodificar no tablet; `Shot` dentro da sessão, em modo Photo.
+
+**Preview no tablet, a implementar (nada escrito ainda):**
+
+- `StockClient`: repetir a sequência testada, com 3 s entre os passos: `SUBSCRIBE`, `changeToRVF`, `GetInfomation`, `GET /livestream_high.avi`. Aceitar `206`. Usar enum próprio para as duas ações novas, fora de `StockQuery`.
+- `SUBSCRIBE` e `UNSUBSCRIBE` por socket da `Network` da câmera (`network.socketFactory`), porque `HttpURLConnection` recusa esses métodos. O IP de retorno vem de `socket.localAddress`. Escutar `NOTIFY` na porta 8059 e responder `200`.
+- Encerrar com `UNSUBSCRIBE` fora da thread principal, sem exigir resposta.
+- Tela: `SphereVideoView` e `LiveViewDecoder`, atrás de `Features.EXPERIMENTAL`, com alternância 360/Dual Fisheye e tela sempre ligada. Sem reabrir sozinho. Pausar a leitura de status durante o stream. Avisar que a câmera demora cerca de 2 min para voltar. Ajustar o texto `stock_read_only`.
+- Testes em `StockClientTest`: ordem dos comandos, sem SID nada é enviado, falha em `GetInfomation` ainda envia `UNSUBSCRIBE`.
+
+**Serviço de volta (2026-11-07, 15:04):** portas abertas, SSDP com 5 respostas, descrição e listas de ações com `200`, e consultas respondendo. O primeiro GET simples deu `503` de novo, e com os cabeçalhos deu `200`. Não se sabe por que o serviço não voltou no primeiro reinício (00:31) e voltou agora; entre um e outro a câmera foi desligada, e o cartão saiu e voltou.
 
 **Pelo cartão (2026-11-07):** `360_0292.JPG` às 00:15 e `360_0293.JPG` às 00:31, numeração seguida e sem arquivo no horário do `Shot`, por volta de 00:26. Conclusão: o `Shot` **não gerou foto**. A foto das 00:31 bate com o teste pelo botão, e novos arquivos das 12:03 em diante indicam uso normal da câmera.
 
@@ -386,6 +473,37 @@ Dezesseis arquivos em `100PHOTO/`, fora do git.
 - **Costura:** fundo do ambiente alinhado à vista, sem medição. Objetos a centímetros das lentes quebram na emenda, por paralaxe, o que é limite físico. Abaixo do horizonte, o `stickFactor` do shader estreita a mistura e deixa a transição com borda dura: avaliar.
 - **Cena parada (`360_0303`), avaliação visual:** paredes, porta, móveis e objetos a mais de cerca de 1 m seguem contínuos nas emendas, sem degrau evidente. A mesa brilhante sob a câmera, muito próxima, quebra na emenda e mostra borda vertical. Não houve comparação com e sem calibração nem medição: a calibração parece adequada, sem prova de ganho.
 - **Eixos do `vrot`:** a cena parada não os valida. Nivelamento segue desligado.
+
+### Exportação longa, 2026-11-07
+
+Cópia de teste de `360_0305` em HEVC 2560x1280, 21 Mbit/s, com os metadados originais; o tablet não abre o 4K original. Exportada no tablet em cerca de 3 min, para 6 min 48 s de vídeo, cerca de 2,3 vezes o tempo real, com status térmico 0.
+
+Saída H.264 2560x1280: 9.805 quadros, igual à entrada; sem intervalos acima de 0,042 s; vídeo com 408,54 s e áudio com 408,53 s; metadados esféricos presentes; decodificação sem erros no PC; sem crash. Isso substitui o critério de 10 min do M2, com três ressalvas: a duração foi 6 min 48 s, o vídeo foi recodificado, e o sincronismo foi verificado por carimbos de tempo, sem conferir fala ou imagem. A tela seguiu ligada o tempo todo, então a exportação com tela apagada segue sem teste.
+
+### Importação e emenda, 2026-11-07
+
+- **Pasta inteira:** `Import folder` entra em subpastas e ignora outros tipos de arquivo. Testado no armazenamento do tablet, com cópias idênticas por MD5. Falta testar com leitor de cartão real.
+- **Fora da tela inicial:** `ImportController` pertence ao app. Um arquivo de 1,5 GB foi copiado em cerca de 15 s, com o app em segundo plano, e ficou idêntico por MD5. Sem cancelamento por enquanto.
+- **Emenda abaixo do horizonte:** o `stickFactor` foi removido, voltando à mistura original do Revive360. Comparando o mesmo recorte de `360_0303`, a borda vertical na mesa próxima **não mudou de forma visível**, então ela vem principalmente de paralaxe. Sem medição.
+- **Emenda do vídeo:** o vídeo usa outro shader (`OesSphereRenderer`), e a remoção do `stickFactor` só havia corrigido a foto. O dono viu problema na costura do vídeo no YouTube. Corrigido com o mesmo método da foto: detalhe em faixa estreita e luz em faixa larga, e sem estreitamento abaixo do horizonte. No mesmo quadro de `360_0295`, a borda vertical dura sumiu nas duas emendas inferiores (avaliação visual). Exportação de 17,6 s em cerca de 16 s, sem perda de quadros. Objetos muito próximos continuam com paralaxe, e não há correção de diferença de exposição entre lentes no vídeo.
+- **Google Photos e YouTube:** o dono confirmou o YouTube como 360 com o vídeo anterior (`360_0295_360.mp4`). O novo está em `100PHOTO/exportados/360_0295_360_v2.mp4`. A foto no Google Fotos não foi confirmada explicitamente.
+- **Compartilhar:** o dono não encontrou como enviar um arquivo já costurado, porque o app não tinha essa função. Adicionado botão em vídeo já costurado ou plano e ícone em foto já costurada. O dono confirmou que o compartilhamento funcionou (2026-11-07). Falta confirmar se os dois serviços exibem o conteúdo como 360.
+
+### Modelo real da lente, 2026-11-07
+
+O dono avaliou a costura do vídeo como "bem ruim". Causa principal: o modelo equidistante erra cerca de 58 px de 2896 a 90 graus do eixo, em relação ao polinômio do firmware (documentado por `greg-randall/gear360-raw`). Foto e vídeo agora usam esse polinômio, com o limite de cada lente vindo do raio gravado no arquivo.
+
+- **Resultado visual, no mesmo quadro:** em `360_0303`, o ventilador deixou de ser cortado e o pandeiro deixou de duplicar. Em `360_0295`, a cortina na emenda voltou a aparecer inteira. Sem medição objetiva da melhora final. O dono avaliou a costura do vídeo novo como boa (2026-11-07).
+- **Rotação entre lentes:** usa metade dos `Diff` de fábrica, com sinais escolhidos por teste em 3 fotos (trechos com correlação acima de 0,8 foram de 4,9% para 13,5%). Evidência modesta, e de uma só unidade.
+- **Paralaxe:** diferença radial medida de -3 a +3,9 graus entre lentes, e dependente da distância. Sem correção: objetos próximos seguem quebrando. A opção é uma emenda adaptativa por conteúdo (`--flow` no `gear360-raw`), ainda não avaliada.
+- **Faixa escura:** no vídeo, resta uma faixa vertical suave em paredes lisas na emenda. Hipóteses: fall-off herdado do C200, sem o polinômio `OPAI` do R210, e falta de `LensGains` no vídeo.
+- **Repositórios sugeridos:** `hugin_panorama`, `ndevenish/Hugin` e `cuixing158/hugin-panorama` não trouxeram solução direta para o app.
+- **ActionDirector (2026-11-07):** as preferências não expõem parâmetros de costura; a única opção 360 é a "Compensação automática de ângulo", para manter a orientação vertical. Ao importar um arquivo duplo, ele grava uma cópia costurada em H.264 4096x2048 na pasta `ActionDirector/2.0/360` do usuário, nomeada `*_Stitch_XHC`. O clipe costurado que já existia mostra uma pessoa menor de idade e foi descartado como amostra. Usar só cenas sem crianças em comparações.
+- **Comparação com a Samsung (`360_0303`, 2026-11-07):** a costura de foto do app ficou visualmente equivalente à do ActionDirector nas duas emendas, a olho e sem medição. A mesa próxima mostra borda vertical nos dois, o que reforça a paralaxe como causa. O ActionDirector entrega 5472x2736, contra 5792x2896 do app, e centra a imagem na lente oposta (deslocamento de cerca de 181 graus). O vídeo não foi comparado. Sem ganho claro à vista, a análise com o REA não se justifica agora.
+
+### Gravação interrompida, 2026-11-07
+
+`360_0305.MP4`: 4096x2048, 6 min 48 s, 1,5 GB, índice completo. O dono viu a câmera desligar, e estimou cerca de 4 min 30 s. Causa não confirmada. `360_0302` chegou a 7 min 59 s. Calor é a hipótese principal: há relatos públicos do mesmo modelo parando em 4K em poucos minutos. Ainda falta repetir o teste observando a tela e a bateria.
 
 ### Listagem de arquivos
 

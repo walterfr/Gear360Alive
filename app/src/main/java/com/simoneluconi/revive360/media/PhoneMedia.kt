@@ -19,17 +19,25 @@ data class PhoneItem(
     val time: Long,
 ) {
     /** A stitched 360 copy (equirectangular), as opposed to a camera original. */
-    val isStitched: Boolean get() = name.substringBeforeLast('.').endsWith(STITCHED_SUFFIX)
+    val isStitched: Boolean get() = isStitchedName(name)
 
     val baseName: String get() = name.substringBeforeLast('.')
 
     /** An ordinary picture made from the sphere (a framing): opens in the phone's own viewer. */
-    val isFlat: Boolean get() = kind == FileKind.PHOTO && !isStitched && !ORIGINAL.matches(baseName)
+    val isFlat: Boolean get() = kind == FileKind.PHOTO && !isStitched && !isOriginalName(name)
 
     companion object {
         const val STITCHED_SUFFIX = "_360"
+        /** The system adds " (1)" when a folder already has that name: `360_0295_360 (1).mp4`. */
+        private val SYSTEM_COPY = Regex(""" \(\d+\)$""")
         /** A camera's own name: DCF, four digits last (360_0042, SAM_0042) */
         private val ORIGINAL = Regex(""".+_\d{4}""")
+
+        private fun plainName(name: String) = name.substringBeforeLast('.').replace(SYSTEM_COPY, "")
+
+        fun isStitchedName(name: String): Boolean = plainName(name).endsWith(STITCHED_SUFFIX)
+
+        fun isOriginalName(name: String): Boolean = ORIGINAL.matches(plainName(name))
     }
 }
 

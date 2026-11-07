@@ -32,7 +32,7 @@ class CameraMetadataTest {
         assertEquals(1442f / 2896f, parsed.frontCenterY, 1e-5f)
         assertEquals(1446f / 2896f, parsed.backCenterX, 1e-5f)
         assertEquals(1452f / 2896f, parsed.backCenterY, 1e-5f)
-        assertEquals(Math.toRadians(0.75).toFloat(), parsed.backRoll, 1e-5f)
+        assertEquals(0.5f * Math.toRadians(0.75).toFloat(), parsed.backRoll, 1e-5f)
     }
 
     @Test
@@ -155,7 +155,7 @@ class CameraMetadataTest {
         val mp4 = temp.newFile("test.mp4").apply { writeBytes(moov) }
 
         val cal = CameraMetadata.readCalibration(mp4)
-        assertEquals(Math.toRadians(1.5).toFloat(), cal.backRoll, 1e-5f)
+        assertEquals(0.5f * Math.toRadians(1.5).toFloat(), cal.backRoll, 1e-5f)
 
         val gyro = CameraMetadata.readMp4Gyro(mp4)
         assertEquals(2, gyro.size)

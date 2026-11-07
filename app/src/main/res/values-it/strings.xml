@@ -140,7 +140,7 @@
 
     <!-- Transfers (foreground service) -->
     <string name="transfer_channel">Trasferimenti</string>
-    <string name="transfer_running">Copia dei file dalla fotocamera</string>
+    <string name="transfer_running">Copia dei file</string>
 
     <!-- Pairing -->
     <string name="pair_title">Configurazione</string>
@@ -290,7 +290,7 @@
     <string name="pair_find_wifi">Cerca il Wi-Fi della fotocamera</string>
 
     <!-- Import -->
-    <string name="import_text">Copia foto e video da un lettore di schede o da una cartella. Gli originali restano intatti.</string>
+    <string name="import_text">Copia foto e video da un lettore di schede o da una cartella. Gli originali restano intatti, e la copia continua se lasci questa schermata.</string>
     <string name="import_action">Importa file</string>
     <string name="import_running">Importazione %1$d di %2$d…</string>
     <string name="import_done">Importati %1$d. Già presenti: %2$d. Saltati: %3$d. Non riusciti: %4$d.</string>
@@ -320,5 +320,15 @@
     <string name="stock_mode">Modalità</string>
     <string name="stock_auto_off">Spegnimento automatico</string>
     <string name="stock_firmware">Firmware</string>
+    <string name="stock_preview">Anteprima dal vivo (prova)</string>
+    <string name="stock_preview_note">L\'anteprima invia alla fotocamera i comandi della sua app per mostrare l\'immagine. Non scatta e non registra.</string>
+    <string name="stock_preview_opening">Apertura dell\'immagine della fotocamera, circa 10 secondi…</string>
+    <string name="stock_preview_stop">Ferma l\'anteprima</string>
+    <string name="stock_preview_wait">Dopo un\'anteprima la fotocamera non risponde per 1-2 minuti, poi torna da sola.</string>
     <string name="stock_read_only">Questa schermata legge soltanto. Non cambia nulla sulla fotocamera.</string>
+    <string name="import_folder">Importa cartella</string>
+    <string name="import_listing">Ricerca di foto e video…</string>
+    <string name="import_failed">Impossibile leggere la cartella. La scheda è ancora collegata?</string>
+    <string name="share_action">Condividi</string>
+    <string name="export_already_360">Questo video è già unito. Condividilo per inviarlo a Google Foto, YouTube o un\'altra app.</string>
 </resources>

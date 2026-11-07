@@ -73,6 +73,36 @@ class RealR210FormatTest {
         assertEquals(Math.toRadians(0.6).toFloat(), samples[1].roll, 1e-4f)
     }
 
+    @Test
+    fun theR210UsesItsRealLensCurve() {
+        val model = CameraMetadata.parseOpax(byteArrayOf(0, 0, 0, 2) + record())!!
+        // The firmware's polynomial: 971.94 of 2048 at 90 degrees
+        assertEquals(971.9376f / 2048f, model.radius((Math.PI / 2).toFloat()), 1e-5f)
+        // The image circle's radius is not set in this record: the curve's own limit applies
+        assertEquals(Math.toRadians(101.0).toFloat(), model.maxTheta, 1e-4f)
+
+        // The same curve in Kotlin and in the shaders' coefficients
+        assertEquals(6, model.polyCoefficients().size)
+        assertEquals(model.lensPoly[1], model.polyCoefficients()[1], 0f)
+    }
+
+    @Test
+    fun anUnknownLensStaysEquidistant() {
+        val model = DualFisheye()
+        val theta = Math.toRadians(70.0).toFloat()
+        assertEquals(model.focal * theta, model.radius(theta), 1e-5f)
+    }
+
+    @Test
+    fun theImageCircleLimitsWhatALensSees() {
+        val withCircle = record().also {
+            ByteBuffer.wrap(it).order(ByteOrder.LITTLE_ENDIAN).putDouble(5 * 8, 1434.486).putDouble(6 * 8, 1434.729)
+        }
+        val model = CameraMetadata.parseOpax(withCircle)!!
+        assertEquals(1434.486f / 2896f, model.radius(model.maxTheta), 1e-4f)
+        assertTrue(model.maxTheta in Math.toRadians(90.0).toFloat()..Math.toRadians(100.0).toFloat())
+    }
+
     /** Runs only where the owner's samples are present: they stay out of git. */
     @Test
     fun readsTheRealFilesWhenPresent() {

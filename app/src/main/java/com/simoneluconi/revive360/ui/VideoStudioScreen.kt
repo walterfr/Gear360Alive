@@ -535,8 +535,15 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                     Box(Modifier.fillMaxWidth(exportProgress.coerceIn(0.02f, 1f)).height(6.dp).clip(CircleShape).background(colors.accent))
                 }
             } else {
-                decision?.let { ExportNote(it) }
-                PillButton(
+                decision?.let { ExportNote(it, alreadyStitched = phoneItem?.isStitched == true) }
+                if (phoneItem != null && decision?.kind == ProcessingDecision.Kind.NOT_DUAL_FISHEYE) {
+                    PillButton(
+                        stringResource(R.string.share_action),
+                        Modifier.fillMaxWidth(),
+                        icon = AppIcons.Share,
+                        style = ButtonStyle.PRIMARY,
+                    ) { shareItem(context, phoneItem) }
+                } else PillButton(
                     "Export ${preset.label} MP4",
                     Modifier.fillMaxWidth(),
                     icon = AppIcons.Video,
@@ -599,10 +606,11 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
 
 /** Says before an export what this device will do with the file; nothing when all is as asked. */
 @Composable
-private fun ExportNote(decision: ProcessingDecision) {
+private fun ExportNote(decision: ProcessingDecision, alreadyStitched: Boolean) {
     val colors = LocalAppColors.current
     val text = when (decision.kind) {
-        ProcessingDecision.Kind.NOT_DUAL_FISHEYE -> stringResource(R.string.export_not_dual)
+        ProcessingDecision.Kind.NOT_DUAL_FISHEYE ->
+            stringResource(if (alreadyStitched) R.string.export_already_360 else R.string.export_not_dual)
         ProcessingDecision.Kind.NO_ENCODER -> stringResource(R.string.export_no_encoder)
         ProcessingDecision.Kind.BEYOND_DECLARED_DECODER -> stringResource(R.string.export_beyond_decoder)
         ProcessingDecision.Kind.REDUCED_OUTPUT -> stringResource(R.string.export_reduced, decision.outWidth, decision.outHeight)

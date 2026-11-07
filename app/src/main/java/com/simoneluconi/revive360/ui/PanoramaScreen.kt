@@ -112,11 +112,12 @@ fun PhonePanoramaScreen(item: PhoneItem) {
             withContext(Dispatchers.IO) { PhoneMedia.local(context, item) }.also { progress(1f) }
         }
     }
-    PanoramaContent(source, item.name)
+    // A stitched copy is what other apps can use; an original is two circles until it is stitched
+    PanoramaContent(source, item.name, share = if (item.isStitched) ({ shareItem(context, item) }) else null)
 }
 
 @Composable
-private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String) {
+private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String, share: (() -> Unit)? = null) {
     val nav = LocalActions.current
     val colors = LocalAppColors.current
     val resources = LocalResources.current
@@ -347,7 +348,14 @@ private fun PanoramaContent(source: PanoramaSource?, fallbackTitle: String) {
         }
     }
 
-    ScreenScaffold(title = source?.title ?: fallbackTitle, scroll = false, bare = full) {
+    ScreenScaffold(
+        title = source?.title ?: fallbackTitle,
+        scroll = false,
+        bare = full,
+        actions = {
+            if (share != null) RoundIconButton(AppIcons.Share, label = stringResource(R.string.share_action), onClick = share)
+        },
+    ) {
         Box(
             (if (full) Modifier.fillMaxSize() else Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(20.dp)))
                 .background(Color.Black)

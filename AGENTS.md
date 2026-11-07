@@ -16,6 +16,64 @@ Referência técnica para transformar a Samsung Gear 360 em uma câmera moderna 
 
 ---
 
+## 0. Estado atual e como continuar (2026-11-07)
+
+Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, seção 13.
+
+### Repositório
+
+- Branch de trabalho: `m0-stock-first`. Commits locais `8212912` (M0, sondas, plano), `4523c46` (importação, `ProcessingPolicy`, `DeviceCodecs`), `c874662` (`StockClient`, tela de status, correções de OPAX/vrot, fotos de uma lente). **Nada foi enviado ao GitHub**; a `main` remota ainda tem o instalador de firmware antigo.
+- **Há trabalho sem commit**: importação de pasta (`ImportController.kt`), costura de vídeo com polinômio de lente (`DualFisheye`, `OesSphereRenderer`, `CameraMetadata`), botão Share, testes novos, `tools/stock_probe/session_step.py`, preview ao vivo (`StockClient.openLive`, `StockCameraScreen`) e `docs/PLANO.md`. Commit só quando o dono pedir.
+- Testes: `./gradlew :app:testDebugUnitTest` dá 79 testes, 0 falhas, 1 ignorado. `StockSafetyTest` falha se `Features.EXPERIMENTAL` for `true`: é proposital.
+- Amostras reais ficam em `100PHOTO/` (fora do git). O APK oficial (`com.samsung.android.samsunggear360manager_1.0.22-43...apk`) está na raiz, fora do git: só extrair fatos técnicos, nunca copiar código Samsung nem executá-lo.
+
+### Privacidade
+
+- `360_0297.MP4` mostra uma criança: não usar para nada, nem metadados. `360_0295` mostra outras pessoas: não publicar. Comparações só com cenas sem crianças (ex.: `360_0303.JPG`).
+- `OpaiData` do `GetInfomation` começa com um identificador da unidade: não copiar para documentos públicos.
+
+### Dispositivos
+
+- Câmera: SM-R210, firmware `R210GLU0ARB2_0.81`. Menu "Connect to iOS" cria a rede `Gear 360(7F97)`, câmera em `192.168.43.1`.
+- Tablet de teste: Lenovo TB361FU, Android 16, sem giroscópio, tela apaga em 60 s. adb sem fio: `adb-HND2KQKK-RYUn3l._adb-tls-connect._tcp`. Decodifica até 2560x1440; 4K HEVC é recusado.
+- PC: Windows, Python 3.15, Android SDK em `%LOCALAPPDATA%\Android\Sdk`. A conexão Wi-Fi do PC com a câmera cai às vezes; os scripts checam a rede antes de enviar.
+
+### Protocolo do firmware original (validado no R210)
+
+- Portas: 7676 (UPnP/SOAP), 7679 (stream), 9001 (arquivos). Descrição `/smp_2_` (o primeiro GET após pausa pode dar 503: normal). Controle `/smp_4_`, eventos `/smp_5_`. Cabeçalhos `User-Agent: SEC_RVF_ML_02:00:00:00:00:00` e `Access-Method: manual`.
+- Consultas seguras: as 10 de `tools/stock_probe/soap_query.py`. O app usa `X_GetSettingInformation` e `X_GetStorage`.
+- **Sequência de sessão testada, uma vez cada, com aprovação:** `SUBSCRIBE` (`CALLBACK: <http://<ip>:8059/evetSub>`, `NT: upnp:event`, `TIMEOUT: Second-300`) → 3 s → `SetOperationState` `changeToRVF` → 3 s → `GetInfomation` (sem argumentos) → 3 s → `GET /livestream_high.avi` (`User-Agent: Android Linux`) → fechar → `UNSUBSCRIBE`.
+- Resultados: `SUBSCRIBE` 200 com SID e `NOTIFY` (`OperationState=IDLE`, bateria, `RVF_CHARGING_STATUS` alterna `Erase`/`Off` no carregador, significado não confirmado). `changeToRVF` 200 em 0,04 s. `GetInfomation` 200 com URLs de stream, opções, `LastFileURL`, `FileCount` e `CalData` (20 inteiros com bits de `double`, iguais ao `opax` dos MP4). Stream: `206`, `TTTS`, **1280x640**, 11 Mbps, **cada `00VD` é um JPEG** (não HEVC), 14,985 fps (timestamps de 8008 a 120 kHz), **nenhum `00AU` nem `00VR`** em 5 s.
+- Depois do `UNSUBSCRIBE` (que costuma dar `RemoteDisconnected`), as portas fecham e a câmera volta sozinha em 50 a 107 s.
+- **`Shot` está suspenso**: o único envio (sem sessão) travou o serviço; voltou desligando a câmera e tirando e recolocando o cartão. Próximo teste de `Shot` só dentro da sessão completa, em modo Photo, com aprovação.
+- Bloqueadas sempre: `X_SetFormat`, `X_SetReset`, `X_LogDumpOperation`, `X_SetSDKSupport`, `X_SetControllerInformation` (devolve `FotaUrlValue`), `ImportResource`, `X_SyncList`, `SetTotalCopyItems`, `X_MakePlaybackFile`. `GetIP` dá 401. `X_GetDeviceStatus` e `GetInfomation` não são consultas puras.
+
+### Ferramentas (`tools/stock_probe/`, relatórios em `reports/`, fora do git)
+
+- `probe.py` (sonda só leitura), `soap_query.py` (consultas), `list_media.py`, `shot_once.py` (**não usar `--send`**), `session_step.py --step subscribe|rvf|info|stream` (sem `--send` só mostra o que enviaria; `--self-test` roda contra câmera falsa).
+
+### Em andamento: preview ao vivo no tablet
+
+- `StockClient.openLive()` repete a sequência testada. `SUBSCRIBE`/`UNSUBSCRIBE` usam socket da `Network` da câmera, porque `HttpURLConnection` não aceita esses métodos. Escuta `NOTIFY` na 8059. Testes em `StockClientTest`.
+- `StockCameraScreen` mostra "Live preview (test)" só com `Features.EXPERIMENTAL`. Usa `SphereVideoView` e `LiveViewDecoder`, nunca reabre sozinho e pausa as consultas de status durante o stream.
+- Primeiro teste no tablet: tela preta com "Opening…" parado, porque o decodificador esperava HEVC. Corrigido: `LiveViewDecoder` reconhece JPEG (`isJpeg`) e desenha na `Surface`; `SphereVideoView.setSourceSize` define o tamanho do buffer.
+- Para testar, compile com `EXPERIMENTAL = true` e devolva a `false` depois.
+- **Validado no tablet em 2026-11-07:** imagem aparece, com atraso de cerca de 2 s e costura razoável em 360. A câmera voltou sozinha depois do preview. Falta medir a origem do atraso (log do app) antes de tirar a opção de trás de `EXPERIMENTAL`.
+
+### Próximos passos
+
+1. Reduzir o atraso do preview (cerca de 2 s), depois de ler o log do app.
+2. `Shot` dentro da sessão, em modo Photo, com aprovação.
+3. Pendências M2: exportar com app em segundo plano ou tela apagada; faixa escura no vídeo (queda de luz/OPAI); leitor de cartão real; preview de 4K; confirmar foto no Google Photos.
+
+### Correções a este arquivo
+
+- Seção 3.1: no R210, o `opax` do MP4 tem 164 bytes (4 de versão em big-endian + 160 de `double` little-endian). Na foto, o deslocamento da tag `0x0012` é relativo ao MakerNote. Campos [5,6] são raios, [7..12] afins, [13..15] `DiffX/DiffY/DiffRoll`.
+- Seção 3.2: no `vrot` do R210 há uma amostra por quadro, a primeira coluna é sempre 0 (sem guinada) e os ângulos dão a volta. O `00VR` ao vivo **não apareceu** no stream `livestream_high.avi`; segue sem confirmação.
+- Seção 1, item 1: vídeo do R210 é sempre HEVC.
+
+---
+
 ## 1. Decisões de Produto e Arquitetura
 
 1. **Câmeras:**
