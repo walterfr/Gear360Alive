@@ -23,7 +23,7 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 ### Repositório
 
 - Branch única: `main` (`origin`, `walterfr/Gear360Alive`). A antiga `m0-stock-first` foi mesclada por fast-forward e apagada em 2026-11-07; o instalador de firmware antigo saiu da `main`.
-- Commits desde `6f27c5c`: `8212912` (M0, sondas, plano), `4523c46` (importação, `ProcessingPolicy`, `DeviceCodecs`), `c874662` (`StockClient`, tela de status, OPAX/vrot, fotos de uma lente), `c7821c9` (preview ao vivo, costura com polinômio de lente, importação de pasta, Share), `7d19fca` (Wi-Fi em baixa latência, medição de atraso, `--stream`) e o commit deste arquivo.
+- Commits desde `6f27c5c`: `8212912` (M0, sondas, plano), `4523c46` (importação, `ProcessingPolicy`, `DeviceCodecs`), `c874662` (`StockClient`, tela de status, OPAX/vrot, fotos de uma lente), `c7821c9` (preview ao vivo, costura com polinômio de lente, importação de pasta, Share), `7d19fca` (Wi-Fi em baixa latência, medição de atraso, `--stream`), `72f281e`/`b00c9f6` (este arquivo), `7f504bd` (foto remota por OSC, `osc_step.py`) e o commit desta atualização.
 - Testes: `./gradlew :app:testDebugUnitTest` (80 testes, 0 falhas, 1 ignorado). `StockSafetyTest` falha se `Features.EXPERIMENTAL` for `true`: é proposital, para nada ir ao commit com a opção ligada.
 - APK de teste para o tablet: troque `EXPERIMENTAL` para `true` em `ui/Features.kt`, rode `./gradlew :app:assembleDebug`, devolva a `false` e instale `app/build/outputs/apk/debug/app-debug.apk` com `adb -s <serial> install -r`.
 
@@ -41,7 +41,12 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 
 ### Dispositivos
 
-- Câmera: SM-R210, firmware `R210GLU0ARB2_0.81`. Menu "Connect to iOS" cria a rede `Gear 360(7F97)`, câmera em `192.168.43.1`.
+- Câmera: SM-R210, firmware `R210GLU0ARB2_0.81`. Sempre em `192.168.43.1`. Dois modos usados, escolhidos no menu da câmera (Connect), **um de cada vez**:
+
+  | Modo | Rede | Portas | O que dá |
+  |---|---|---|---|
+  | "Connect to iOS" | `Gear 360(7F97)` | 7676, 7679, 9001 | status, preview ao vivo, arquivos (SOAP da Samsung) |
+  | "Connect to Street View" | `Gear 360(7F97).OSC`, senha de 8 dígitos na tela | 80 | foto remota já costurada, HDR (OSC v1) |
 - Tablet de teste: Lenovo TB361FU, Android 16, sem giroscópio, tela apaga em 60 s. Decodifica até 2560x1440; 4K HEVC é recusado. Pacote `io.github.walterfr.gear360alive`; log do app em `files/log/events.txt` (`adb -s <serial> shell run-as io.github.walterfr.gear360alive cat files/log/events.txt`).
 - adb sem fio: o nome mDNS é `adb-HND2KQKK-RYUn3l` (às vezes aparece como `adb-HND2KQKK-RYUn3l (2)`), IP `192.168.1.189`, porta muda. Se `adb devices` vier vazio, rode `adb kill-server`, `adb start-server` e `adb mdns services`. Com o tablet na rede da câmera não há adb.
 - PC: Windows, Python 3.15, Android SDK em `%LOCALAPPDATA%\Android\Sdk`. Entra na câmera com `netsh wlan connect name="Gear 360(7F97)"`. A conexão cai às vezes, sobretudo após `UNSUBSCRIBE` e com o desligamento automático da câmera (5 min); os scripts checam a rede antes de enviar. No Git Bash, argumentos que começam com `/` são reescritos: por isso `--stream high|bc_high`.
@@ -55,12 +60,14 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 - Resultados: `SUBSCRIBE` 200 com SID e `NOTIFY` (`OperationState=IDLE`, bateria, `RVF_CHARGING_STATUS` alterna `Erase`/`Off` no carregador, significado não confirmado). `changeToRVF` 200 em 0,04 s. `GetInfomation` 200 com URLs de stream, opções, `LastFileURL`, `FileCount` e `CalData` (20 inteiros com bits de `double`, iguais ao `opax` dos MP4). Stream: `206`, `TTTS`, **1280x640**, 11 Mbps, **cada `00VD` é um JPEG** (não HEVC), 14,985 fps (timestamps de 8008 a 120 kHz), **nenhum `00AU` nem `00VR`** em 5 s.
 - Depois do `UNSUBSCRIBE` (que costuma dar `RemoteDisconnected`), as portas fecham e a câmera volta sozinha em 50 a 107 s.
 - **Foto remota funciona pelo modo "Connect to Street View" (OSC v1, porta 80, rede `Gear 360(7F97).OSC` com senha de 8 dígitos na tela).** Testado em 2026-11-07: `camera.startSession` → `camera.takePicture` (uma vez) → `/osc/commands/status` até `done` (16,2 s) → `camera.closeSession`. Arquivo `SAM_0306.JPG` em `/mnt/mmc/DCIM/100PHOTO/`, **já costurado pela câmera** (5472x2736, XMP GPano `equirectangular`), diferente das fotos do botão (`360_*.JPG`, 5792x2896, duas lentes). `getOptions` só traz modo `image`, ISO e WB `auto` e HDR: sem controles manuais. Nesse modo só a porta 80 abre (sem preview nem SOAP). Ferramenta: `tools/stock_probe/osc_step.py --step options|picture`. `/osc/info` traz o número de série real: não publicar.
-- **`Shot` está suspenso**: o único envio (sem sessão) travou o serviço; voltou desligando a câmera e tirando e recolocando o cartão. Próximo teste de `Shot` só dentro da sessão completa, em modo Photo, com aprovação.
+- **`Shot` (SOAP) está suspenso e deixou de ser prioridade:** o único envio (sem sessão) travou o serviço; voltou desligando a câmera e tirando e recolocando o cartão. A foto remota agora vem pelo OSC. Só testar `Shot` de novo se for preciso foto em duas lentes (5792x2896) remota, dentro da sessão completa, em modo Photo, com aprovação.
+- Comandos OSC permitidos até agora: `camera.startSession`, `camera.getOptions`, `camera.takePicture`, `camera.closeSession`, `/osc/state` e `/osc/commands/status`. Ainda não testados: `listImages`, `getImage`, `getMetadata`, `setOptions` (HDR), `delete` (exige confirmação do dono).
 - Bloqueadas sempre: `X_SetFormat`, `X_SetReset`, `X_LogDumpOperation`, `X_SetSDKSupport`, `X_SetControllerInformation` (devolve `FotaUrlValue`), `ImportResource`, `X_SyncList`, `SetTotalCopyItems`, `X_MakePlaybackFile`. `GetIP` dá 401. `X_GetDeviceStatus` e `GetInfomation` não são consultas puras.
 
 ### Ferramentas (`tools/stock_probe/`, relatórios em `reports/`, fora do git)
 
-- `probe.py` (sonda só leitura), `soap_query.py` (consultas), `list_media.py`, `shot_once.py` (**não usar `--send`**), `session_step.py --step subscribe|rvf|info|stream [--stream high|bc_high]` (sem `--send` só mostra o que enviaria; `--self-test` roda contra câmera falsa; o stream nunca é gravado, só contagens e a estrutura dos primeiros blocos).
+- `probe.py` (sonda só leitura), `soap_query.py` (consultas), `list_media.py`, `shot_once.py` (**não usar `--send`**), `session_step.py --step subscribe|rvf|info|stream [--stream high|bc_high]` (sem `--send` só mostra o que enviaria; `--self-test` roda contra câmera falsa; o stream nunca é gravado, só contagens e a estrutura dos primeiros blocos), `osc_step.py --step options|picture` (modo Street View; mesmo esquema de dry run, `--send` e `--self-test`; `picture` envia um único `takePicture` e só lê o status depois).
+- No app, o cliente OSC antigo é `OscClient.kt` (de `arellaeast/gear360-revive`); ainda não está ligado à tela da câmera.
 
 ### Preview ao vivo no tablet (funciona, ainda atrás de `EXPERIMENTAL`)
 
@@ -73,11 +80,12 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 
 ### Próximos passos
 
-1. Repetir o preview mais longo para ver se a queda de vazão após 15 s se repete; se sim, investigar o Wi-Fi da câmera.
-2. `Shot` dentro da sessão, em modo Photo, com aprovação: novo passo em `session_step.py` (SUBSCRIBE, changeToRVF, GetInfomation, Shot com `GPSINFO` vazio, UNSUBSCRIBE), conferindo modo Photo, bateria e espaço antes, como `shot_once.py`.
+1. **Foto remota no app pelo OSC**, atrás de `EXPERIMENTAL`: tela para o modo Street View (pedir a senha de 8 dígitos, entrar na rede `.OSC`), sessão, `takePicture`, status até `done`, `closeSession`, e baixar o `fileUri` com `camera.getImage` (testar `getImage` antes pelo PC, com aprovação). Reaproveitar `OscClient.kt` se servir; testes com fixtures das respostas reais (em `tools/stock_probe/reports/osc-*.json`, sem o número de série).
+2. Repetir o preview mais longo para ver se a queda de vazão após 15 s se repete; se sim, investigar o Wi-Fi da câmera.
 3. Tirar o preview de trás de `EXPERIMENTAL` quando a queda de vazão estiver explicada.
-4. Entender o layout de `livestream_bc_high.avi` (bloco `00VR` de 32 bytes) para ter giroscópio e áudio ao vivo.
-5. Pendências M2: exportar com app em segundo plano ou tela apagada; faixa escura no vídeo (queda de luz/OPAI); leitor de cartão real; preview de 4K; confirmar foto no Google Photos.
+4. Comparar a costura da câmera (`SAM_0306.JPG`) com a do app e a do ActionDirector, em cena sem pessoas.
+5. Entender o layout de `livestream_bc_high.avi` (bloco `00VR` de 32 bytes) para ter giroscópio e áudio ao vivo.
+6. Pendências M2: exportar com app em segundo plano ou tela apagada; faixa escura no vídeo (queda de luz/OPAI); leitor de cartão real; preview de 4K; confirmar foto no Google Photos.
 
 ### Correções a este arquivo
 
