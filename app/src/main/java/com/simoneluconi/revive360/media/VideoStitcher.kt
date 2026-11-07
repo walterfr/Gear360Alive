@@ -52,6 +52,9 @@ object VideoStitcher {
         val hudTelemetry: Boolean = false,
         val gpxTrack: List<TelemetryHud.GpxPoint> = emptyList(),
         val bitrate: Int = if (preset == AspectPreset.EQUIRECT_360) 28_000_000 else 14_000_000,
+        /** From [ProcessingPolicy]: what this device can encode. */
+        val outWidth: Int = preset.width,
+        val outHeight: Int = preset.height,
     )
 
     fun export(config: ExportConfig, onProgress: (Float) -> Unit = {}) {
@@ -87,8 +90,8 @@ object VideoStitcher {
             CameraMetadata.readMp4Gyro(config.input, durationUs)
         } else emptyList()
 
-        val outWidth = config.preset.width
-        val outHeight = config.preset.height
+        val outWidth = config.outWidth
+        val outHeight = config.outHeight
         val encFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, outWidth, outHeight).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, config.bitrate)

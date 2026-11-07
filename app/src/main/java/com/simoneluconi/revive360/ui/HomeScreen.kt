@@ -114,6 +114,7 @@ fun HomeScreen() {
     ) {
         if (cameras.isEmpty()) {
             WelcomeCard()
+            ImportCard()
             return@ScreenScaffold
         }
         cameras.forEach { c ->
@@ -150,14 +151,7 @@ fun HomeScreen() {
             nav.navigate(Screen.Pair())
         }
         // What is already on the phone, whichever camera is on
-        Card(padding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)) {
-            SettingRow(
-                title = stringResource(R.string.gallery_tab_phone),
-                subtitle = stringResource(R.string.phone_subtitle),
-                icon = AppIcons.Gallery,
-                onClick = { nav.navigate(Screen.Gallery) },
-            )
-        }
+        ImportCard()
     }
 }
 

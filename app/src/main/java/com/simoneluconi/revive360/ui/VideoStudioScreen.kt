@@ -42,11 +42,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.simoneluconi.revive360.R
 import com.simoneluconi.revive360.EventLog
+import com.simoneluconi.revive360.media.DeviceCodecs
+import com.simoneluconi.revive360.media.ProcessingDecision
 import com.simoneluconi.revive360.media.MediaSaver
 import com.simoneluconi.revive360.media.PhoneItem
 import com.simoneluconi.revive360.media.PhoneMedia
@@ -229,6 +233,23 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
             throw e
         } catch (e: Exception) {
             error = e.message ?: "Failed to load video"
+        }
+    }
+
+    // What this device can do with this file, for the chosen output (null: not read yet)
+    var decision by remember { mutableStateOf<ProcessingDecision?>(null) }
+    LaunchedEffect(localFile, preset) {
+        val src = localFile ?: return@LaunchedEffect
+        val equirect = preset == AspectPreset.EQUIRECT_360
+        decision = withContext(Dispatchers.IO) {
+            runCatching {
+                DeviceCodecs.decide(
+                    src,
+                    targetWidth = if (equirect) null else preset.width,
+                    targetHeight = if (equirect) null else preset.height,
+                    alreadyStitched = phoneItem?.isStitched == true,
+                )
+            }.onFailure { EventLog.log("Video limits not read: ${it.message}") }.getOrNull()
         }
     }
 
@@ -514,14 +535,16 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                     Box(Modifier.fillMaxWidth(exportProgress.coerceIn(0.02f, 1f)).height(6.dp).clip(CircleShape).background(colors.accent))
                 }
             } else {
+                decision?.let { ExportNote(it) }
                 PillButton(
                     "Export ${preset.label} MP4",
                     Modifier.fillMaxWidth(),
                     icon = AppIcons.Video,
                     style = ButtonStyle.PRIMARY,
-                    enabled = localFile != null,
+                    enabled = localFile != null && decision?.canExport == true,
                 ) {
                     val src = localFile ?: return@PillButton
+                    val output = decision ?: return@PillButton
                     val curView = sphereView?.view ?: ViewState()
                     val kfs = keyframes.toList()
                     val chosenPreset = preset
@@ -550,6 +573,8 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                                         nadirPatch = useNadir,
                                         hudTelemetry = useHud,
                                         gpxTrack = curGpx,
+                                        outWidth = output.outWidth,
+                                        outHeight = output.outHeight,
                                     )
                                 ) { exportProgress = it }
                                 MediaSaver.publish(context, outName, FileKind.VIDEO, "video/mp4", shotTime, outFile)
@@ -559,8 +584,8 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            EventLog.log("Video export failed: ${e.message}")
-                            nav.message("Export failed: ${e.message}", MessageKind.BAD)
+                            EventLog.log("Video export failed: $e")
+                            nav.message("Export failed: ${e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName}. The original is safe.", MessageKind.BAD)
                         } finally {
                             outFile.delete()
                             exporting = false
@@ -570,6 +595,21 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
             }
         }
     }
+}
+
+/** Says before an export what this device will do with the file; nothing when all is as asked. */
+@Composable
+private fun ExportNote(decision: ProcessingDecision) {
+    val colors = LocalAppColors.current
+    val text = when (decision.kind) {
+        ProcessingDecision.Kind.NOT_DUAL_FISHEYE -> stringResource(R.string.export_not_dual)
+        ProcessingDecision.Kind.NO_ENCODER -> stringResource(R.string.export_no_encoder)
+        ProcessingDecision.Kind.BEYOND_DECLARED_DECODER -> stringResource(R.string.export_beyond_decoder)
+        ProcessingDecision.Kind.REDUCED_OUTPUT -> stringResource(R.string.export_reduced, decision.outWidth, decision.outHeight)
+        ProcessingDecision.Kind.PROCESS -> if (decision.realtime) null else stringResource(R.string.export_slow)
+    } ?: return
+    Label(text, Modifier.fillMaxWidth(), size = 13.sp, color = colors.text2)
+    Spacer(Modifier.height(8.dp))
 }
 
 private fun formatMs(ms: Long): String {

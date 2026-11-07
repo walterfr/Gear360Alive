@@ -136,6 +136,15 @@ Tamanhos são relativos (P, M, G), não prazos.
 
 Entrega valor sem nenhum comando à câmera.
 
+**Status (2026-11-07):** parte sem amostras feita, sem commit. Testado no tablet com vídeos sintéticos, já apagados:
+
+- **Importação:** por seletor de arquivos, cópia idêntica por MD5, galeria atualizada. O teste revelou que o provedor pode informar tamanho errado (`0 B`); o tamanho agora vem do arquivo aberto. Ainda falta: seleção de pasta, repetir com leitor de cartão real, e rodar em serviço (sair da tela interrompe entre arquivos).
+- **Política de processamento:** `ProcessingPolicy`, com todos os modos da seção 12 e limites simulados. Avisos conferidos na tela para 1080p, 4096x2048 e 2560x1280.
+- **Exportação 360 de 2560x1280 a 30 fps (3 s):** saída H.264 em 2560x1280, 30 fps, áudio e metadados esféricos. Antes tentaria 3840x1920, acima do limite do tablet. A costura não foi avaliada, porque a imagem era sintética.
+- **4096x2048 H.264 a 24 fps:** o tablet recusou o decodificador, tanto no preview quanto na exportação. Sem crash, sem arquivo parcial, original intacto. Falta repetir com arquivo real da câmera, cujo codec não foi confirmado.
+
+Fica para as amostras: OPAX, `vrot`, qualidade de costura, vídeo de 10 min, Google Photos e YouTube.
+
 - Importação por seletor de arquivos e pasta (`OpenDocumentTree`), incluindo leitor OTG.
 - Álbum unificado com originais preservados.
 - Validar com amostras reais do R210: OPAX, `vrot`, stitch de foto e vídeo.
@@ -328,6 +337,12 @@ Primeiro uso de POST: 10 ações, `POST /smp_4_`, com a câmera respondendo depo
 - **Ajustes úteis:** EV de -3 a +3, ISO máximo 400 a 1600, WB, nitidez, HDR, corte de vento, lentes, timer, intervalo e tempo de gravação.
 - **`ResetValue`:** confirma `X_SetReset` com `All`, `Camera` e `Connection`. Segue bloqueada.
 - **Bateria e firmware:** `X_GetSettingInformation` basta para a tela inicial, sem usar `GetInfomation`.
+
+### Listagem de arquivos
+
+Depois de gravar amostras, `X_GetStorage` passou de 7 para 68 de espaço usado e o modo passou a `Photo`, então as consultas refletem o estado atual. Mesmo assim, `Browse` do contêiner 8 retornou 0 itens, com `DeviceStatus` = `LiveView`.
+
+Hipótese, ainda não testada: a listagem exige `SetOperationState` com `changeToML`, que muda o estado da câmera e precisa de aprovação própria. Sem listagem por Wi-Fi, as amostras vêm do cartão, por leitor.
 
 ### Queda do Wi-Fi
 

@@ -34,7 +34,8 @@ enum class AspectPreset(val label: String, val width: Int, val height: Int) {
     VERTICAL_9_16("9:16", 1080, 1920),
     HORIZONTAL_16_9("16:9", 1920, 1080),
     SQUARE_1_1("1:1", 1080, 1080),
-    EQUIRECT_360("360° 4K", 3840, 1920);
+    /** The export follows the source's own size ([com.simoneluconi.revive360.media.ProcessingPolicy]). */
+    EQUIRECT_360("360°", 3840, 1920);
 
     val ratio: Float get() = width.toFloat() / height
 }

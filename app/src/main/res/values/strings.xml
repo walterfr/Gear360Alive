@@ -290,4 +290,17 @@
     <string name="pair_permission">The app needs the Bluetooth permission to find the camera.</string>
     <string name="pair_manual">Camera without Bluetooth? Enter its code</string>
     <string name="pair_find_wifi">Find the camera\'s Wi-Fi</string>
+
+    <!-- Import -->
+    <string name="import_text">Copy photos and videos from a card reader or a folder. The originals stay as they are.</string>
+    <string name="import_action">Import files</string>
+    <string name="import_running">Importing %1$d of %2$d…</string>
+    <string name="import_done">Imported %1$d. Already here: %2$d. Skipped: %3$d. Failed: %4$d.</string>
+
+    <!-- Export limits -->
+    <string name="export_not_dual">This video has nothing to stitch: it uses one lens or is already stitched.</string>
+    <string name="export_no_encoder">This device has no encoder for this export.</string>
+    <string name="export_beyond_decoder">This device declares less than this video needs. The export may fail; the original stays safe.</string>
+    <string name="export_reduced">This device will export at %1$dx%2$d.</string>
+    <string name="export_slow">This export will take longer than the video.</string>
 </resources>

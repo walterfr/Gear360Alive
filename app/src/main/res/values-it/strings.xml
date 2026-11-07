@@ -288,4 +288,17 @@
     <string name="pair_permission">Per trovare la fotocamera l\'app ha bisogno del permesso Bluetooth.</string>
     <string name="pair_manual">Fotocamera senza Bluetooth? Inserisci il codice</string>
     <string name="pair_find_wifi">Cerca il Wi-Fi della fotocamera</string>
+
+    <!-- Import -->
+    <string name="import_text">Copia foto e video da un lettore di schede o da una cartella. Gli originali restano intatti.</string>
+    <string name="import_action">Importa file</string>
+    <string name="import_running">Importazione %1$d di %2$d…</string>
+    <string name="import_done">Importati %1$d. Già presenti: %2$d. Saltati: %3$d. Non riusciti: %4$d.</string>
+
+    <!-- Export limits -->
+    <string name="export_not_dual">Questo video non ha nulla da unire: usa un solo obiettivo o è già unito.</string>
+    <string name="export_no_encoder">Questo dispositivo non ha un codificatore per questa esportazione.</string>
+    <string name="export_beyond_decoder">Questo dispositivo dichiara meno di quanto richiede il video. L\'esportazione può non riuscire; l\'originale resta al sicuro.</string>
+    <string name="export_reduced">Questo dispositivo esporterà a %1$dx%2$d.</string>
+    <string name="export_slow">Questa esportazione durerà più del video.</string>
 </resources>
