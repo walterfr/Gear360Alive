@@ -22,8 +22,8 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 
 ### Repositório
 
-- Branch de trabalho: `m0-stock-first`, enviada ao GitHub (`origin`, `walterfr/Gear360Alive`). A `main` remota **não** recebeu nada e ainda tem o instalador de firmware antigo; não mesclar sem o dono pedir.
-- Commits da branch: `8212912` (M0, sondas, plano), `4523c46` (importação, `ProcessingPolicy`, `DeviceCodecs`), `c874662` (`StockClient`, tela de status, OPAX/vrot, fotos de uma lente), `c7821c9` (preview ao vivo, costura com polinômio de lente, importação de pasta, Share), `7d19fca` (Wi-Fi em baixa latência, medição de atraso, `--stream`) e o commit deste arquivo.
+- Branch única: `main` (`origin`, `walterfr/Gear360Alive`). A antiga `m0-stock-first` foi mesclada por fast-forward e apagada em 2026-11-07; o instalador de firmware antigo saiu da `main`.
+- Commits desde `6f27c5c`: `8212912` (M0, sondas, plano), `4523c46` (importação, `ProcessingPolicy`, `DeviceCodecs`), `c874662` (`StockClient`, tela de status, OPAX/vrot, fotos de uma lente), `c7821c9` (preview ao vivo, costura com polinômio de lente, importação de pasta, Share), `7d19fca` (Wi-Fi em baixa latência, medição de atraso, `--stream`) e o commit deste arquivo.
 - Testes: `./gradlew :app:testDebugUnitTest` (80 testes, 0 falhas, 1 ignorado). `StockSafetyTest` falha se `Features.EXPERIMENTAL` for `true`: é proposital, para nada ir ao commit com a opção ligada.
 - APK de teste para o tablet: troque `EXPERIMENTAL` para `true` em `ui/Features.kt`, rode `./gradlew :app:assembleDebug`, devolva a `false` e instale `app/build/outputs/apk/debug/app-debug.apk` com `adb -s <serial> install -r`.
 
