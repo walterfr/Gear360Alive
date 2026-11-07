@@ -423,7 +423,18 @@ Um único `GET /livestream_high.avi` na porta 7679, depois de `SUBSCRIBE`, `chan
 
 **Formato do stream, 2026-11-07 (relatório local `session-stream-20261107-194253.json`):** cabeçalho `TTTS` de 124 bytes até `movi`; blocos `id(4) tamanho(4, BE) timestamp(8, BE)`. Cada `00VD` traz **um JPEG** (`ffd8ffdb...`, cerca de 110 KB), **não HEVC**. Timestamps de 8008 em 8008 (relógio de 120 kHz), ou seja, 14,985 fps. Foi por isso que o primeiro teste no tablet ficou em tela preta: `LiveViewDecoder` esperava HEVC. Agora ele desenha JPEG na `Surface`. Câmera voltou em 42,9 s.
 
-**Preview no tablet, 2026-11-07: funciona.** Com `StockClient.openLive` e decodificação de JPEG, a imagem apareceu no Lenovo TB361FU. Atraso de cerca de 2 s e costura razoável em 360, segundo o dono. Depois de parar o preview, a câmera voltou a responder sozinha. Log do app ainda não lido (tablet fora do adb). A causa do atraso não foi medida: pode vir do buffer da câmera, da rede ou da decodificação.
+**Preview no tablet, 2026-11-07: funciona.** Com `StockClient.openLive` e decodificação de JPEG, a imagem apareceu no Lenovo TB361FU. Atraso de cerca de 2 s e costura razoável em 360, segundo o dono. Depois de parar o preview, a câmera voltou a responder sozinha. Log do app ainda não lido (tablet fora do adb). 
+
+**Medição do atraso, 2026-11-07 19:55 (log do app, 37 s de preview):**
+
+- Tablet decodifica e desenha cada JPEG em 10 a 15 ms, e nunca havia outro quadro inteiro esperando (0 pulados). **O tablet não é a causa.**
+- Chegam cerca de 9,6 quadros/s (41 a 52 a cada 5 s), contra 15 no PC.
+- O desvio entre chegada e relógio da câmera sobe a 3,2 s nos primeiros 6 s e depois oscila entre 1,7 e 2,8 s, sem crescer. Portanto, uma fila de cerca de 2 s se forma no começo, antes do tablet (na câmera ou no Wi-Fi), e fica estável. Como o desvio não cresce com 9,6 quadros/s, a câmera parece descartar quadros na origem.
+- **`livestream_bc_high.avi`, 2026-11-07 20:08, pelo PC (relatório local `session-stream-20261107-200828.json`):** `206`, `TTTS`, **1440x720**, cerca de 127 KB por quadro, 15,1 quadros/s (15,4 Mbps). É **mais pesado** que o `high`, então não reduz o atraso. Mas traz **áudio e giroscópio**: 235 `00AU` e 76 `00VR` em 5 s. O primeiro bloco é `00VR` com 32 bytes (pares racionais, `0/10`...), não 24; depois dele, a leitura `id/tamanho/timestamp` desalinha e o JPEG começa 8 bytes antes do esperado. Formato desse stream ainda não entendido, e `LiveViewDecoder` não o lê. Câmera voltou em 29,8 s.
+- `GetInfomation` declara só `High` em `StreamQuality`, então `SetStreamQuality` não deve oferecer opção mais leve.
+- No PC, o `high` chega a 15 quadros/s; no tablet, 9,6. A diferença aponta para o Wi-Fi do tablet. Primeira tentativa, sem comando novo à câmera: travar o Wi-Fi do tablet em modo de baixa latência (`WIFI_MODE_FULL_LOW_LATENCY`) enquanto o preview está aberto.
+- **Com Wi-Fi em baixa latência, 2026-11-07 20:13:** nos primeiros 15 s, 15 quadros/s e desvio estável em -60 ms, ou seja, sem fila. Depois a vazão caiu (57, 12, 22 e 34 quadros a cada 5 s), o desvio subiu até 8,2 s, e a rede da câmera caiu às 20:14:23. A queda da rede às 20:14:23 foi o fim da sessão: o dono parou o preview, e o `UNSUBSCRIBE` derruba a rede da câmera por alguns segundos. A queda de vazão nos 20 s anteriores segue sem causa: Wi-Fi da câmera instável (como nas quedas do PC), interferência, distância ou aquecimento.
+- Hipótese: a vazão do Wi-Fi entre câmera e tablet não dá conta de cerca de 110 KB por quadro. Para reduzir, testar um stream mais leve (`livestream_bc_high.avi`, 1280x720 declarado, ou `SetStreamQuality`), cada um como comando novo, com aprovação.
 
 Relato do dono sobre esses testes: só a conexão da câmera com o PC caiu, várias vezes. Causa não confirmada; o relato não detalha tela nem LED.
 

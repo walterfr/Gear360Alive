@@ -8,6 +8,7 @@ import android.media.MediaFormat
 import android.os.Build
 import android.os.SystemClock
 import android.view.Surface
+import com.simoneluconi.revive360.EventLog
 import com.simoneluconi.revive360.stitch.CameraMetadata
 import com.simoneluconi.revive360.stitch.GyroSample
 import java.io.DataInputStream
@@ -39,6 +40,12 @@ class LiveViewDecoder(
 ) {
     private var codec: MediaCodec? = null
     private var bitmap: Bitmap? = null
+    private var statsWall = 0L
+    private var statsTs = 0L
+    private var windowStart = 0L
+    private var received = 0
+    private var dropped = 0
+    private var decodeMs = 0L
     private var frames = 0L
     // Falling behind: the camera's timeline against the phone's clock
     private var anchorWall = 0L
@@ -59,7 +66,12 @@ class LiveViewDecoder(
                 val payload = ByteArray(size).also { data.readFully(it) }
                 when (String(id, Charsets.US_ASCII)) {
                     VIDEO_CHUNK -> when {
-                        isJpeg(payload) -> jpeg(payload)
+                        isJpeg(payload) -> {
+                            // Another whole frame already waiting: this one would only add delay
+                            val stale = data.available() > size
+                            if (!stale) jpeg(payload)
+                            jpegStats(timestamp, stale)
+                        }
                         else -> {
                             onAccessUnit(payload)
                             if (!behind(payload, timestamp)) video(payload, timestamp, width, height)
@@ -119,8 +131,36 @@ class LiveViewDecoder(
         return box.getInt(vid + 16) to box.getInt(vid + 20)
     }
 
+    /**
+     * Every 5 s in the event log: frames received, skipped and their decode time, and how far the
+     * arrivals drift from the camera's clock since the first frame. A growing drift means the phone
+     * falls behind; a steady one, that the delay comes before the phone (camera or Wi-Fi).
+     */
+    private fun jpegStats(timestamp: Long, skipped: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        if (statsWall == 0L) {
+            statsWall = now
+            statsTs = timestamp
+            windowStart = now
+        }
+        received++
+        if (skipped) dropped++
+        if (now - windowStart < STATS_MS) return
+        val drift = (now - statsWall) - (timestamp - statsTs) * 1_000 / TIMESCALE
+        val shown = received - dropped
+        EventLog.log(
+            "Live JPEG: $received received, $dropped skipped, " +
+                "${if (shown > 0) decodeMs / shown else 0} ms per frame, drift $drift ms",
+        )
+        windowStart = now
+        received = 0
+        dropped = 0
+        decodeMs = 0
+    }
+
     /** The SM-R210's livestream_high.avi: one JPEG per video chunk, drawn as it comes. */
     private fun jpeg(data: ByteArray) {
+        val started = SystemClock.elapsedRealtime()
         val options = BitmapFactory.Options().apply {
             inMutable = true
             inBitmap = bitmap
@@ -135,6 +175,7 @@ class LiveViewDecoder(
         } finally {
             surface.unlockCanvasAndPost(canvas)
         }
+        decodeMs += SystemClock.elapsedRealtime() - started
         onFrame(++frames)
     }
 
@@ -182,6 +223,7 @@ class LiveViewDecoder(
         private const val INPUT_WAIT_US = 100_000L
         /** How far the picture may fall behind the camera before frames are dropped */
         private const val MAX_LAG_MS = 400L
+        private const val STATS_MS = 5_000L
 
         private const val NAL_VPS = 32
         private const val NAL_SPS = 33

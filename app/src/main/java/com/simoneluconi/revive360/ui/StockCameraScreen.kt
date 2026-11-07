@@ -1,6 +1,7 @@
 package com.simoneluconi.revive360.ui
 
 import android.net.Network
+import android.net.wifi.WifiManager
 import android.view.Surface
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -211,7 +212,17 @@ private fun StockPreview(camera: StockClient, onClose: () -> Unit) {
     val session = remember { StockLiveSession(camera) }
     val view = remember { AtomicReference<SphereVideoView?>(null) }
     val model = remember { DualFisheye(focal = CameraMetadata.R210_FOCAL, lensPoly = CameraMetadata.R210_POLY) }
-    DisposableEffect(Unit) { onDispose { session.stop() } }
+    val context = LocalContext.current
+    DisposableEffect(Unit) {
+        // Wi-Fi power saving delays bursts: the tablet got 9.6 of the camera's 15 pictures a second
+        val wifi = context.applicationContext.getSystemService(WifiManager::class.java)
+        val lock = wifi?.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "gear360alive:preview")
+        runCatching { lock?.acquire() }.onFailure { EventLog.log("Wi-Fi low latency lock: ${it.message}") }
+        onDispose {
+            session.stop()
+            runCatching { if (lock?.isHeld == true) lock.release() }
+        }
+    }
     LaunchedEffect(Unit) {
         var last = 0L
         while (true) {

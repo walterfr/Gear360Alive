@@ -58,11 +58,12 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 - `StockCameraScreen` mostra "Live preview (test)" só com `Features.EXPERIMENTAL`. Usa `SphereVideoView` e `LiveViewDecoder`, nunca reabre sozinho e pausa as consultas de status durante o stream.
 - Primeiro teste no tablet: tela preta com "Opening…" parado, porque o decodificador esperava HEVC. Corrigido: `LiveViewDecoder` reconhece JPEG (`isJpeg`) e desenha na `Surface`; `SphereVideoView.setSourceSize` define o tamanho do buffer.
 - Para testar, compile com `EXPERIMENTAL = true` e devolva a `false` depois.
-- **Validado no tablet em 2026-11-07:** imagem aparece, com atraso de cerca de 2 s e costura razoável em 360. A câmera voltou sozinha depois do preview. Falta medir a origem do atraso (log do app) antes de tirar a opção de trás de `EXPERIMENTAL`.
+- **Validado no tablet em 2026-11-07:** imagem aparece, com atraso de cerca de 2 s e costura razoável em 360. A câmera voltou sozinha depois do preview.
+- Atraso medido (log `Live JPEG`, a cada 5 s): tablet decodifica em 10 a 15 ms e nunca acumula; chegam cerca de 9,6 quadros/s; uma fila estável de cerca de 2 s se forma antes do tablet, na câmera ou no Wi-Fi. `LiveViewDecoder` pula um JPEG quando outro inteiro já está esperando (ainda não aconteceu). `livestream_bc_high.avi` foi testado: 1440x720, mais pesado, mas com `00AU` e `00VR` (formato ainda não entendido). Com `WIFI_MODE_FULL_LOW_LATENCY` durante o preview, o tablet recebe 15 quadros/s sem fila; num teste, a vazão caiu depois de 15 s, por causa ainda desconhecida.
 
 ### Próximos passos
 
-1. Reduzir o atraso do preview (cerca de 2 s), depois de ler o log do app.
+1. Repetir o preview mais longo para ver se a queda de vazão após 15 s se repete; se sim, investigar o Wi-Fi da câmera.
 2. `Shot` dentro da sessão, em modo Photo, com aprovação.
 3. Pendências M2: exportar com app em segundo plano ou tela apagada; faixa escura no vídeo (queda de luz/OPAI); leitor de cartão real; preview de 4K; confirmar foto no Google Photos.
 

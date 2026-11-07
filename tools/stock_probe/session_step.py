@@ -44,6 +44,8 @@ STEPS = {
 }
 STREAM_PORT = 7679
 STREAM_PATH = "/livestream_high.avi"
+# Read only: both come from the camera's own GetInfomation answer (bc_high declares 1280x720).
+STREAM_PATHS = ("/livestream_high.avi", "/livestream_bc_high.avi")
 STREAM_HEADERS = {"User-Agent": "Android Linux", "Connection": "Keep-Alive"}  # As the official client
 STREAM_SECONDS = 5
 STREAM_MAX_SECONDS = 15
@@ -224,6 +226,10 @@ def read_stream(source_ip, seconds=STREAM_SECONDS):
         if first is not None:
             result["read_seconds"] = round(time.monotonic() - first, 2)
         result.update(stream_header(header))
+        video = result["chunks"]["00VD"]
+        if video and first is not None:
+            result["bytes_per_video_chunk"] = result["bytes"] // video
+            result["video_chunks_per_second"] = round(video / max(result["read_seconds"], 0.01), 1)
         if header:
             result["layout"] = chunk_layout(header)
     return result
@@ -491,10 +497,14 @@ def self_test():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--step", choices=tuple(STEPS), default="subscribe")
+    # Names without the slash: Git Bash on Windows rewrites arguments that start with one.
+    parser.add_argument("--stream", choices=[p.removeprefix("/livestream_").removesuffix(".avi") for p in STREAM_PATHS],
+                        default="high")
     parser.add_argument("--send", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
         self_test()
         sys.exit(0)
+    STREAM_PATH = f"/livestream_{args.stream}.avi"
     sys.exit(main(args.step, args.send))
