@@ -1,208 +1,146 @@
 package com.simoneluconi.revive360.protocol
 
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import org.json.JSONObject
 
 /**
- * Open Spherical Camera (OSC v1) client for the Samsung Gear 360 (2017 SM-R210) in stock
- * "Connect to Street View" mode (`192.168.107.1:80` or `192.168.43.1:80`).
- *
- * Allows zero-mod photo capture, file listing (with automatic fallback across `camera.listFiles`,
- * `camera.listImages` and `camera._listFiles`), file download, deletion, and battery/storage queries.
+ * The only OSC v1 commands this client can send to a camera on its original firmware in "Connect to
+ * Street View" mode: each one was tested on an SM-R210 (docs/PLANO.md, section 13).
+ */
+enum class OscCommand(val wire: String) {
+    StartSession("camera.startSession"),
+    CloseSession("camera.closeSession"),
+    GetOptions("camera.getOptions"),
+    TakePicture("camera.takePicture"),
+    GetImage("camera.getImage"),
+}
+
+data class OscStatus(
+    val model: String?,
+    val firmware: String?,
+    val batteryPercent: Int?,
+)
+
+/**
+ * Open Spherical Camera (OSC v1, port 80) client for the SM-R210 in stock "Connect to Street View"
+ * mode (`Gear 360(XXXX).OSC`). Blocking: call on an IO dispatcher.
  */
 class OscClient(
     host: String = DEFAULT_HOST,
     port: Int = DEFAULT_PORT,
     private val connector: Connector = Connector { it.openConnection() as HttpURLConnection },
+    private val settleMs: Long = SETTLE_MS,
+    private val pollMs: Long = POLL_MS,
+    private val limitMs: Long = LIMIT_MS,
 ) {
     private val base = "http://${if (':' in host) "[$host]" else host}:$port"
-    private var sessionId: String? = null
 
-    data class OscState(
-        val sessionId: String?,
-        val batteryPercent: Int,
-        val storageUri: String?,
-    )
-
-    fun info(): CameraInfo {
-        val o = JSONObject(request("GET", "/osc/info"))
-        val model = o.optString("model", "SM-R210").ifEmpty { "SM-R210" }
-        val firmware = o.optString("firmwareVersion", "stock-osc")
-        val serial = o.optString("serialNumber", "000000")
-        return CameraInfo(
-            protocol = Protocol.VERSION,
-            serverName = "osc-streetview",
-            serverVersion = "1.0",
-            model = model,
-            modelRaw = model,
-            firmware = firmware,
-            adapter = "osc",
-            adapterStatus = "supported",
-            mac = serial,
-            name = "Gear 360 ($model OSC)",
-            capabilities = Capabilities(
-                captureModes = listOf(CaptureMode.PHOTO),
-                photoQualities = emptyList(),
-                photoResolutions = listOf("5472x2736"),
-                resolutionSettable = false,
-                videoModes = emptyList(),
-                record = false,
-                liveview = false,
-                listFiles = true,
-                download = true,
-                range = false,
-                delete = true,
-                thumbnails = true,
-                battery = true,
-                storage = false,
-                batteryTemperature = false,
-                leds = emptyList(),
-                debugLog = false,
-                time = false,
-                power = false,
-                settings = emptyList(),
-            ),
-        )
-    }
-
-    fun state(): OscState {
-        val o = JSONObject(request("POST", "/osc/state", "{}"))
-        val state = o.optJSONObject("state") ?: JSONObject()
-        val sid = state.optString("sessionId", "").takeIf { it.isNotEmpty() }
-        if (sid != null) sessionId = sid
-        val batt = (state.optDouble("batteryLevel", 0.0) * 100.0).toInt().coerceIn(0, 100)
-        val storage = state.optString("_storageUri", state.optString("storageUri", "")).takeIf { it.isNotEmpty() }
-        return OscState(sid, batt, storage)
-    }
-
-    fun ensureSession(): String {
-        sessionId?.let { return it }
-        state().sessionId?.let { return it }
-        val res = execute("camera.startSession", JSONObject())
-        val sid = res.optJSONObject("results")?.optString("sessionId", "")?.takeIf { it.isNotEmpty() }
-            ?: "osc-session"
-        sessionId = sid
-        return sid
-    }
-
-    fun takePicture(): String {
-        val sid = ensureSession()
-        val res = execute("camera.takePicture", JSONObject().put("sessionId", sid))
-        val state = res.optString("state")
-        if (state == "inProgress") {
-            val id = res.optString("id")
-            repeat(30) {
-                Thread.sleep(500)
-                val poll = JSONObject(request("POST", "/osc/commands/status", JSONObject().put("id", id).toString()))
-                if (poll.optString("state") == "done") {
-                    return poll.optJSONObject("results")?.optString("fileUri") ?: ""
-                }
-            }
+    fun status(): OscStatus {
+        val info = JSONObject(request("GET", "/osc/info"))
+        val state = JSONObject(request("POST", "/osc/state", "{}")).optJSONObject("state") ?: JSONObject()
+        val battery = if (state.has("batteryLevel")) {
+            (state.optDouble("batteryLevel") * 100.0).toInt().coerceIn(0, 100)
+        } else {
+            null
         }
-        return res.optJSONObject("results")?.optString("fileUri") ?: ""
+        return OscStatus(
+            model = info.optString("model", "").ifEmpty { null },
+            firmware = info.optString("firmwareVersion", "").ifEmpty { null },
+            batteryPercent = battery,
+        )
     }
 
     /**
-     * Lists files using Samsung's OSC command variants (`camera.listFiles`, `camera.listImages`,
-     * `camera._listFiles`).
+     * Takes one stitched 360° photo (`SAM_XXXX.JPG`), polls `/osc/commands/status` until `done`,
+     * closes the session, and downloads the JPEG via `camera.getImage` into [target]. Never retries
+     * `takePicture`. Returns the file name on the card.
      */
-    fun listFiles(entryCount: Int = 100): List<CameraFile> {
-        val commands = listOf(
-            "camera.listFiles" to JSONObject().put("fileType", "all").put("entryCount", entryCount).put("maxThumbSize", 0),
-            "camera.listImages" to JSONObject().put("entryCount", entryCount).put("includeThumb", false),
-            "camera._listFiles" to JSONObject().put("entryCount", entryCount),
-        )
-        for ((cmd, params) in commands) {
-            val res = runCatching { execute(cmd, params) }.getOrNull() ?: continue
-            val entries = res.optJSONObject("results")?.optJSONArray("entries") ?: continue
-            return parseEntries(entries)
+    fun shoot(target: File): String {
+        request("POST", "/osc/state", "{}")
+        val started = execute(OscCommand.StartSession, JSONObject())
+        val sid = started.optJSONObject("results")?.optString("sessionId", "").orEmpty()
+        if (sid.isEmpty() || sid == NO_SESSION) throw IOException("OSC: no session")
+        val fileUri = try {
+            if (settleMs > 0) Thread.sleep(settleMs)
+            var answer = execute(OscCommand.TakePicture, JSONObject().put("sessionId", sid))
+            val commandId = answer.optString("id", "")
+            val deadline = System.currentTimeMillis() + limitMs
+            while (answer.optString("state") == "inProgress" && commandId.isNotEmpty() && System.currentTimeMillis() < deadline) {
+                if (pollMs > 0) Thread.sleep(pollMs)
+                answer = JSONObject(request("POST", "/osc/commands/status", JSONObject().put("id", commandId).toString()))
+            }
+            val finalState = answer.optString("state")
+            if (finalState != "done") throw IOException("OSC takePicture: $finalState")
+            val uri = answer.optJSONObject("results")?.optString("fileUri", "").orEmpty()
+            if (uri.isEmpty()) throw IOException("OSC takePicture: no fileUri")
+            if (settleMs > 0) Thread.sleep(settleMs)
+            uri
+        } finally {
+            runCatching { execute(OscCommand.CloseSession, JSONObject().put("sessionId", sid)) }
         }
-        return emptyList()
+        if (settleMs > 0) Thread.sleep(settleMs)
+        getImage(fileUri, target)
+        return fileUri.substringAfterLast('/').ifEmpty { "SAM_360.JPG" }
     }
 
-    fun download(fileUri: String, target: File, progress: (Long, Long) -> Unit = { _, _ -> }) {
-        val path = if (fileUri.startsWith("http://") || fileUri.startsWith("https://")) {
-            URL(fileUri).path
-        } else if (fileUri.startsWith("/")) {
-            fileUri
-        } else {
-            "/files/$fileUri"
-        }
-        val conn = connector.open(URL(base + path)).apply {
-            requestMethod = "GET"
-            connectTimeout = 5_000
-            readTimeout = 30_000
+    fun getImage(fileUri: String, target: File) {
+        val body = JSONObject()
+            .put("name", OscCommand.GetImage.wire)
+            .put("parameters", JSONObject().put("fileUri", fileUri))
+            .toString()
+            .toByteArray(Charsets.UTF_8)
+        val conn = open("/osc/commands/execute", IMAGE_READ_TIMEOUT_MS).apply {
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            setFixedLengthStreamingMode(body.size)
         }
         try {
+            conn.outputStream.use { it.write(body) }
             val code = conn.responseCode
-            if (code !in 200..299) throw CameraException(code, CameraException.INTERNAL, "OSC HTTP $code")
-            val total = conn.contentLengthLong
+            if (code != 200) throw IOException("OSC getImage: HTTP $code")
             FileOutputStream(target).use { out ->
                 conn.inputStream.use { input ->
                     val buf = ByteArray(64 * 1024)
-                    var done = 0L
+                    var total = 0L
+                    var b0 = -1
+                    var b1 = -1
                     while (true) {
                         val n = input.read(buf)
                         if (n < 0) break
-                        out.write(buf, 0, n)
-                        done += n
-                        progress(done, total)
+                        if (n > 0) {
+                            if (total == 0L) b0 = buf[0].toInt() and 0xFF
+                            if (total == 0L && n > 1) b1 = buf[1].toInt() and 0xFF
+                            else if (total == 1L) b1 = buf[0].toInt() and 0xFF
+                            out.write(buf, 0, n)
+                            total += n
+                        }
+                    }
+                    if (total < 2L || b0 != 0xFF || b1 != 0xD8) {
+                        throw IOException("OSC getImage: not a JPEG")
                     }
                 }
             }
+        } catch (e: Exception) {
+            target.delete()
+            throw e
         } finally {
             conn.disconnect()
         }
     }
 
-    fun delete(fileUri: String) {
-        execute("camera.delete", JSONObject().put("fileUri", fileUri).put("fileUrls", JSONArray().put(fileUri)))
-    }
-
-    fun execute(name: String, parameters: JSONObject = JSONObject()): JSONObject {
-        val body = JSONObject().put("name", name).apply {
-            if (parameters.length() > 0) put("parameters", parameters)
-        }.toString()
+    private fun execute(command: OscCommand, parameters: JSONObject): JSONObject {
+        val body = JSONObject().put("name", command.wire).put("parameters", parameters).toString()
         return JSONObject(request("POST", "/osc/commands/execute", body))
     }
 
-    private fun parseEntries(entries: JSONArray): List<CameraFile> {
-        val out = ArrayList<CameraFile>(entries.length())
-        for (i in 0 until entries.length()) {
-            val e = entries.getJSONObject(i)
-            val uri = e.optString("fileUrl", e.optString("fileUri", ""))
-            val name = e.optString("name", uri.substringAfterLast('/'))
-            if (name.isEmpty()) continue
-            val size = e.optLong("size", 0L)
-            val kind = when (name.substringAfterLast('.', "").lowercase()) {
-                "jpg", "jpeg" -> FileKind.PHOTO
-                "mp4", "mov" -> FileKind.VIDEO
-                "dng", "srw", "raw" -> FileKind.RAW
-                else -> FileKind.OTHER
-            }
-            out += CameraFile(
-                path = uri.ifEmpty { "DCIM/100PHOTO/$name" },
-                name = name,
-                size = size,
-                mtime = System.currentTimeMillis() / 1000L - i,
-                kind = kind,
-            )
-        }
-        return out
-    }
-
     private fun request(method: String, path: String, body: String? = null): String {
-        val conn = connector.open(URL(base + path)).apply {
+        val conn = open(path, READ_TIMEOUT_MS).apply {
             requestMethod = method
-            connectTimeout = 5_000
-            readTimeout = 15_000
-            useCaches = false
-            setRequestProperty("X-XSRF-Protected", "1")
         }
         try {
             if (body != null) {
@@ -213,19 +151,29 @@ class OscClient(
                 conn.outputStream.use { it.write(bytes) }
             }
             val code = conn.responseCode
-            if (code !in 200..299) {
-                val err = runCatching { conn.errorStream?.use(InputStream::readBytes)?.toString(Charsets.UTF_8) }.getOrNull()
-                throw CameraException(code, CameraException.INTERNAL, err ?: "OSC HTTP $code")
-            }
-            return conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            if (code != 200) throw IOException("OSC $path: HTTP $code")
+            return conn.inputStream.bufferedReader().use { it.readText() }
         } finally {
             conn.disconnect()
         }
     }
 
+    private fun open(path: String, readTimeoutMs: Int): HttpURLConnection = connector.open(URL(base + path)).apply {
+        connectTimeout = CONNECT_TIMEOUT_MS
+        readTimeout = readTimeoutMs
+        useCaches = false
+        setRequestProperty("Connection", "close")
+    }
+
     companion object {
-        const val DEFAULT_HOST = "192.168.107.1"
-        const val FALLBACK_HOST = "192.168.43.1"
+        const val DEFAULT_HOST = "192.168.43.1"
         const val DEFAULT_PORT = 80
+        private const val NO_SESSION = "SID_0000"
+        private const val CONNECT_TIMEOUT_MS = 8_000
+        private const val READ_TIMEOUT_MS = 15_000
+        private const val IMAGE_READ_TIMEOUT_MS = 30_000
+        private const val SETTLE_MS = 2_000L
+        private const val POLL_MS = 2_000L
+        private const val LIMIT_MS = 60_000L
     }
 }

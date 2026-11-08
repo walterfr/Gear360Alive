@@ -1,0 +1,1 @@
+{ "manufacturer": "Samsung Electronics", "model": "GEAR 360", "serialNumber": "00000000000", "firmwareVersion": "R210GLU0ARB2", "supportUrl": "www.samsung.com", "endpoints": { "httpPort": 80, "httpUpdatePort": 80 }, "gps": false, "gyro": false, "uptime": 50, "api": [ "\/osc\/info", "\/osc\/state", "\/osc\/checkForUpdates", "\/osc\/commands\/execute", "\/osc\/commands\/status" ] }

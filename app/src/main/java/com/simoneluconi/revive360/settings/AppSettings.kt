@@ -44,6 +44,11 @@ class AppSettings(context: Context) {
         get() = prefs.getString(STOCK_PASSPHRASE, null)
         set(value) = prefs.edit { putString(STOCK_PASSPHRASE, value) }
 
+    /** The Wi-Fi code for Street View (.OSC) mode, kept so it is typed once. App-private, never logged. */
+    var oscPassphrase: String?
+        get() = prefs.getString(OSC_PASSPHRASE, null) ?: stockPassphrase
+        set(value) = prefs.edit { putString(OSC_PASSPHRASE, value) }
+
     fun setTheme(mode: ThemeMode) {
         _theme.value = mode
         prefs.edit { putString(THEME, mode.name) }
@@ -71,6 +76,7 @@ class AppSettings(context: Context) {
         const val HAPTICS = "haptics"
         const val DEV_HOST = "dev_host"
         const val STOCK_PASSPHRASE = "stock_passphrase"
+        const val OSC_PASSPHRASE = "osc_passphrase"
 
         inline fun <reified T : Enum<T>> enumOr(name: String?, default: T): T =
             enumValues<T>().firstOrNull { it.name == name } ?: default

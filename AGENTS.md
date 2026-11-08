@@ -61,13 +61,13 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 - Depois do `UNSUBSCRIBE` (que costuma dar `RemoteDisconnected`), as portas fecham e a câmera volta sozinha em 50 a 107 s.
 - **Foto remota funciona pelo modo "Connect to Street View" (OSC v1, porta 80, rede `Gear 360(7F97).OSC` com senha de 8 dígitos na tela).** Testado em 2026-11-07: `camera.startSession` → `camera.takePicture` (uma vez) → `/osc/commands/status` até `done` (16,2 s) → `camera.closeSession`. Arquivo `SAM_0306.JPG` em `/mnt/mmc/DCIM/100PHOTO/`, **já costurado pela câmera** (5472x2736, XMP GPano `equirectangular`), diferente das fotos do botão (`360_*.JPG`, 5792x2896, duas lentes). `getOptions` só traz modo `image`, ISO e WB `auto` e HDR: sem controles manuais. Nesse modo só a porta 80 abre (sem preview nem SOAP). Ferramenta: `tools/stock_probe/osc_step.py --step options|picture`. `/osc/info` traz o número de série real: não publicar.
 - **`Shot` (SOAP) está suspenso e deixou de ser prioridade:** o único envio (sem sessão) travou o serviço; voltou desligando a câmera e tirando e recolocando o cartão. A foto remota agora vem pelo OSC. Só testar `Shot` de novo se for preciso foto em duas lentes (5792x2896) remota, dentro da sessão completa, em modo Photo, com aprovação.
-- Comandos OSC permitidos até agora: `camera.startSession`, `camera.getOptions`, `camera.takePicture`, `camera.closeSession`, `/osc/state` e `/osc/commands/status`. Ainda não testados: `listImages`, `getImage`, `getMetadata`, `setOptions` (HDR), `delete` (exige confirmação do dono).
+- Comandos OSC permitidos até agora: `camera.startSession`, `camera.getOptions`, `camera.takePicture`, `camera.closeSession`, `camera.getImage`, `/osc/state` e `/osc/commands/status`. `camera.getImage` testado em 2026-11-07: devolveu `SAM_0306.JPG` (5.764.246 bytes) em 0,96 s, SHA-256 idêntico ao cartão, sem sessão aberta. Ainda não testados: `listImages`, `getMetadata`, `setOptions` (HDR), `delete` (exige confirmação do dono).
 - Bloqueadas sempre: `X_SetFormat`, `X_SetReset`, `X_LogDumpOperation`, `X_SetSDKSupport`, `X_SetControllerInformation` (devolve `FotaUrlValue`), `ImportResource`, `X_SyncList`, `SetTotalCopyItems`, `X_MakePlaybackFile`. `GetIP` dá 401. `X_GetDeviceStatus` e `GetInfomation` não são consultas puras.
 
 ### Ferramentas (`tools/stock_probe/`, relatórios em `reports/`, fora do git)
 
-- `probe.py` (sonda só leitura), `soap_query.py` (consultas), `list_media.py`, `shot_once.py` (**não usar `--send`**), `session_step.py --step subscribe|rvf|info|stream [--stream high|bc_high]` (sem `--send` só mostra o que enviaria; `--self-test` roda contra câmera falsa; o stream nunca é gravado, só contagens e a estrutura dos primeiros blocos), `osc_step.py --step options|picture` (modo Street View; mesmo esquema de dry run, `--send` e `--self-test`; `picture` envia um único `takePicture` e só lê o status depois).
-- No app, o cliente OSC antigo é `OscClient.kt` (de `arellaeast/gear360-revive`); ainda não está ligado à tela da câmera.
+- `probe.py` (sonda só leitura), `soap_query.py` (consultas), `list_media.py`, `shot_once.py` (**não usar `--send`**), `session_step.py --step subscribe|rvf|info|stream [--stream high|bc_high]` (sem `--send` só mostra o que enviaria; `--self-test` roda contra câmera falsa; o stream nunca é gravado, só contagens e a estrutura dos primeiros blocos), `osc_step.py --step options|picture|image` (modo Street View; mesmo esquema de dry run, `--send` e `--self-test`; `picture` envia um único `takePicture` e só lê o status depois; `image` baixa um `fileUri` com `camera.getImage` e só guarda contagens e SHA-256).
+- No app, `OscClient.kt` usa `OscCommand` (lista permitida validada no R210) e está ligado a `StockCameraScreen` (liberado fora de `Features.EXPERIMENTAL`), com testes em `OscClientTest` sobre fixtures reais sem o número de série. **Validado no tablet em 2026-11-07:** tela da câmera mostrou `Capturing`, o tablet salvou `SAM_0307.JPG` em `Gear360Alive` e abriu a foto no visualizador 360.
 
 ### Preview ao vivo no tablet (funciona, ainda atrás de `EXPERIMENTAL`)
 
@@ -80,7 +80,7 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 
 ### Próximos passos
 
-1. **Foto remota no app pelo OSC**, atrás de `EXPERIMENTAL`: tela para o modo Street View (pedir a senha de 8 dígitos, entrar na rede `.OSC`), sessão, `takePicture`, status até `done`, `closeSession`, e baixar o `fileUri` com `camera.getImage` (testar `getImage` antes pelo PC, com aprovação). Reaproveitar `OscClient.kt` se servir; testes com fixtures das respostas reais (em `tools/stock_probe/reports/osc-*.json`, sem o número de série).
+1. **Foto remota pelo OSC liberada no app** (validada em câmera e tablet com `SAM_0307.JPG` e no visualizador 360). Falta repetir com mais disparos seguidos para o critério do M3.
 2. Repetir o preview mais longo para ver se a queda de vazão após 15 s se repete; se sim, investigar o Wi-Fi da câmera.
 3. Tirar o preview de trás de `EXPERIMENTAL` quando a queda de vazão estiver explicada.
 4. Comparar a costura da câmera (`SAM_0306.JPG`) com a do app e a do ActionDirector, em cena sem pessoas.

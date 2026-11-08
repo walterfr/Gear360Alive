@@ -1,0 +1,57 @@
+{
+  "step": "picture",
+  "state": {
+    "status": 200,
+    "seconds": 0.03,
+    "body": "{ \"fingerprint\": \"ABCD1234\", \"state\": { \"sessionId\": \"SID_0000\", \"batteryLevel\": 1.000000 } }",
+    "json": {
+      "fingerprint": "ABCD1234",
+      "state": {
+        "sessionId": "SID_0000",
+        "batteryLevel": 1.0
+      }
+    }
+  },
+  "startSession": {
+    "status": 200,
+    "seconds": 0.01,
+    "body": "{ \"name\": \"camera.startSession\", \"state\": \"done\", \"results\": { \"sessionId\": \"SID_0216\", \"timeout\": 300 } }",
+    "json": {
+      "name": "camera.startSession",
+      "state": "done",
+      "results": {
+        "sessionId": "SID_0216",
+        "timeout": 300
+      }
+    }
+  },
+  "sessionId": "SID_0216",
+  "picture": {
+    "takePicture": {
+      "status": 200,
+      "seconds": 0.04,
+      "body": "{ \"name\": \"camera.takePicture\", \"state\": \"inProgress\", \"id\": \"1\", \"progress\": { \"completion\": 0.000000 } }"
+    },
+    "polls": [
+      {
+        "status": 200,
+        "seconds": 0.06,
+        "body": "{ \"name\": \"camera.takePicture\", \"state\": \"inProgress\", \"id\": \"1\", \"progress\": { \"completion\": 0.000000 } }"
+      },
+      {
+        "status": 200,
+        "seconds": 0.03,
+        "body": "{ \"name\": \"camera.takePicture\", \"state\": \"done\", \"results\": { \"fileUri\": \"\\/mnt\\/mmc\\/DCIM\\/100PHOTO\\/SAM_0306.JPG\" } }"
+      }
+    ],
+    "final_state": "done",
+    "fileUri": "/mnt/mmc/DCIM/100PHOTO/SAM_0306.JPG",
+    "seconds": 16.2
+  },
+  "closeSession": {
+    "status": 200,
+    "seconds": 0.02,
+    "body": "{ \"name\": \"camera.closeSession\", \"state\": \"done\" }"
+  },
+  "healthy_at_end": true
+}

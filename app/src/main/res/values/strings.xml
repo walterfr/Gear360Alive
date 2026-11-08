@@ -328,6 +328,13 @@
     <string name="stock_preview_stop">Stop the preview</string>
     <string name="stock_preview_wait">After a preview the camera stops answering for 1 to 2 minutes, then comes back by itself.</string>
     <string name="stock_read_only">This screen only reads. It changes nothing on the camera.</string>
+    <string name="stock_mode_ios">Connect to iOS</string>
+    <string name="stock_mode_osc">Street View (OSC)</string>
+    <string name="stock_osc_steps">On the camera, hold Menu until a Connect to option appears, press Menu until it shows Connect to Street View, and confirm with the shutter button. Then type the 8-digit code shown on its screen.</string>
+    <string name="stock_osc_shoot">Take 360° photo</string>
+    <string name="stock_osc_shooting">Taking &amp; stitching on the camera (~16 s)…</string>
+    <string name="stock_osc_note">Takes one 5472×2736 photo stitched by the camera (SAM_XXXX.JPG) and saves it to the phone.</string>
+    <string name="stock_osc_saved">Saved in %1$s: %2$s</string>
     <string name="import_folder">Import folder</string>
     <string name="import_listing">Looking for photos and videos…</string>
     <string name="import_failed">Could not read that folder. Is the card still connected?</string>

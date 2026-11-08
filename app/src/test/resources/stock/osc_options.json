@@ -1,0 +1,59 @@
+{
+  "state": {
+    "status": 200,
+    "seconds": 0.04,
+    "body": "{ \"fingerprint\": \"ABCD1234\", \"state\": { \"sessionId\": \"SID_0000\", \"batteryLevel\": 1.000000 } }",
+    "json": {
+      "fingerprint": "ABCD1234",
+      "state": {
+        "sessionId": "SID_0000",
+        "batteryLevel": 1.0
+      }
+    }
+  },
+  "startSession": {
+    "status": 200,
+    "seconds": 0.04,
+    "body": "{ \"name\": \"camera.startSession\", \"state\": \"done\", \"results\": { \"sessionId\": \"SID_0216\", \"timeout\": 300 } }",
+    "json": {
+      "name": "camera.startSession",
+      "state": "done",
+      "results": {
+        "sessionId": "SID_0216",
+        "timeout": 300
+      }
+    }
+  },
+  "sessionId": "SID_0216",
+  "getOptions": {
+    "status": 200,
+    "seconds": 0.03,
+    "body": "{ \"name\": \"camera.getOptions\", \"state\": \"done\", \"results\": { \"options\": { \"captureMode\": \"image\", \"captureModeSupport\": [ \"image\" ], \"iso\": \"auto\", \"whiteBalance\": \"auto\", \"hdr\": true, \"hdrSupport\": true } } }",
+    "json": {
+      "name": "camera.getOptions",
+      "state": "done",
+      "results": {
+        "options": {
+          "captureMode": "image",
+          "captureModeSupport": [
+            "image"
+          ],
+          "iso": "auto",
+          "whiteBalance": "auto",
+          "hdr": true,
+          "hdrSupport": true
+        }
+      }
+    }
+  },
+  "closeSession": {
+    "status": 200,
+    "seconds": 0.64,
+    "body": "{ \"name\": \"camera.closeSession\", \"state\": \"done\" }",
+    "json": {
+      "name": "camera.closeSession",
+      "state": "done"
+    }
+  },
+  "healthy_at_end": true
+}
