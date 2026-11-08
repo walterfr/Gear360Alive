@@ -83,8 +83,8 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 1. **Foto remota pelo OSC liberada no app** (validada em câmera e tablet com `SAM_0307.JPG` e no visualizador 360). Falta repetir com mais disparos seguidos para o critério do M3.
 2. Repetir o preview mais longo para ver se a queda de vazão após 15 s se repete; se sim, investigar o Wi-Fi da câmera.
 3. Tirar o preview de trás de `EXPERIMENTAL` quando a queda de vazão estiver explicada.
-4. Comparar a costura da câmera (`SAM_0306.JPG`) com a do app e a do ActionDirector, em cena sem pessoas.
-5. Entender o layout de `livestream_bc_high.avi` (bloco `00VR` de 32 bytes) para ter giroscópio e áudio ao vivo.
+4. Costura comparada (2026-11-07): Câmera OSC (5472x2736 crop) vs App (5792x2896 nativo integral OCamCalib) vs ActionDirector (5472x2736). Qualidade alinhada a >1,5 m; mesa próxima sofre paralaxe física inevitável em todas.
+5. Layout de `livestream_bc_high.avi` entendido (2026-11-07): `00VR` é chunk AVI de 32 bytes (4 pares racionais num/den), sem os 8 bytes de timestamp de `00VD`/`00AU`. `livestream_high.avi` (1280x640 JPEG puro a 11 Mbps) mantido como padrão do app.
 6. Pendências M2: exportar com app em segundo plano ou tela apagada; faixa escura no vídeo (queda de luz/OPAI); leitor de cartão real; preview de 4K; confirmar foto no Google Photos.
 
 ### Correções a este arquivo
@@ -154,7 +154,7 @@ Cada unidade física da Gear 360 possui calibração de fábrica gravada na EEPR
   - Header: `u32 size`, `"vrot"`, `u32 0`, `u32 count`
   - Amostras: `count × { s32 a*10, s32 10, s32 b*10, s32 10, s32 c*10, s32 10 }` (racionais big-endian para pitch, roll, yaw com precisão de $0.1^\circ$).
 - **No Stream Ao Vivo `TTTS` (chunk `00VR`):**
-  - `size (4B BE)` + `timestamp (8B BE)` + 3 pares de `int32` (`num / den`) representando `yaw`, `pitch`, `roll` sincronizados com o clock de 120 kHz do stream.
+  - No SM-R210 (`livestream_bc_high.avi`): `id (4B: 00VR)` + `size (4B BE: 32)` + 4 pares de `int32` (`num / den`, den=10: yaw=0, pitch, roll, aux), **sem os 8 bytes de timestamp** de `00VD`/`00AU`.
 
 ---
 

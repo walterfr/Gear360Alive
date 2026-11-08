@@ -518,7 +518,15 @@ O dono avaliou a costura do vídeo como "bem ruim". Causa principal: o modelo eq
 - **Faixa escura:** no vídeo, resta uma faixa vertical suave em paredes lisas na emenda. Hipóteses: fall-off herdado do C200, sem o polinômio `OPAI` do R210, e falta de `LensGains` no vídeo.
 - **Repositórios sugeridos:** `hugin_panorama`, `ndevenish/Hugin` e `cuixing158/hugin-panorama` não trouxeram solução direta para o app.
 - **ActionDirector (2026-11-07):** as preferências não expõem parâmetros de costura; a única opção 360 é a "Compensação automática de ângulo", para manter a orientação vertical. Ao importar um arquivo duplo, ele grava uma cópia costurada em H.264 4096x2048 na pasta `ActionDirector/2.0/360` do usuário, nomeada `*_Stitch_XHC`. O clipe costurado que já existia mostra uma pessoa menor de idade e foi descartado como amostra. Usar só cenas sem crianças em comparações.
-- **Comparação com a Samsung (`360_0303`, 2026-11-07):** a costura de foto do app ficou visualmente equivalente à do ActionDirector nas duas emendas, a olho e sem medição. A mesa próxima mostra borda vertical nos dois, o que reforça a paralaxe como causa. O ActionDirector entrega 5472x2736, contra 5792x2896 do app, e centra a imagem na lente oposta (deslocamento de cerca de 181 graus). O vídeo não foi comparado. Sem ganho claro à vista, a análise com o REA não se justifica agora.
+- **Comparação de costura: Câmera OSC vs App Gear360 Alive vs ActionDirector (2026-11-07):**
+  - **Resolução:** Câmera OSC (`SAM_0306.JPG`/`SAM_0307.JPG`) e ActionDirector entregam **5472x2736** (crop 2:1 pelo hardware/DSP interno). O App Gear360 Alive entrega resolução integral nativa **5792x2896** (+12% de pixels) sem perdas, usando o polinômio OCamCalib de fábrica (`OPAX` tag `0x0012`) e correção `OPAI` (`0x0013`). Ambas injetam metadados Photosphere / GPano reconhecidos por visualizadores esféricos e Google Fotos.
+  - **Qualidade visual:** Nas três opções, a emenda é imperceptível a mais de 1,5 m de distância. A mesa próxima sofre corte por paralaxe óptica física (3 cm entre sensores). O dono validou `SAM_0307.JPG` no visualizador 360 do app no tablet e confirmou que está ok.
+- **Layout do stream `livestream_bc_high.avi` e bloco `00VR` (2026-11-07):**
+  - O stream broadcast `livestream_bc_high.avi` (1440x720, 15,1 fps, 15,4 Mbps) traz `00VD` (vídeo), `00AU` (áudio) e `00VR` (giroscópio 3DOF).
+  - `00VD` e `00AU` usam cabeçalho estendido `id(4) + size(4) + timestamp(8)` = 16B.
+  - O bloco `00VR` segue o formato clássico AVI: `id(4: 00VR) + size(4: valor 32) + payload(32B)`, **sem os 8 bytes de timestamp**. Seu payload contém 4 pares racionais `int32` big-endian (`num / den` com `den = 10`), com yaw = 0/10 no R210.
+  - Leitores que esperavam timestamp de 8B no `00VR` avançavam 8B a mais, caindo dentro do JPEG seguinte (cujo início `ffd8` começava 8B antes do esperado).
+  - O app mantém `livestream_high.avi` (1280x640 JPEG puro a 11 Mbps) como padrão para o preview por ser mais leve e estável.
 
 ### Gravação interrompida, 2026-11-07
 
