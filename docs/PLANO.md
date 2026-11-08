@@ -497,7 +497,7 @@ Dezesseis arquivos em `100PHOTO/`, fora do git.
 
 Cópia de teste de `360_0305` em HEVC 2560x1280, 21 Mbit/s, com os metadados originais; o tablet não abre o 4K original. Exportada no tablet em cerca de 3 min, para 6 min 48 s de vídeo, cerca de 2,3 vezes o tempo real, com status térmico 0.
 
-Saída H.264 2560x1280: 9.805 quadros, igual à entrada; sem intervalos acima de 0,042 s; vídeo com 408,54 s e áudio com 408,53 s; metadados esféricos presentes; decodificação sem erros no PC; sem crash. Isso substitui o critério de 10 min do M2, com três ressalvas: a duração foi 6 min 48 s, o vídeo foi recodificado, e o sincronismo foi verificado por carimbos de tempo, sem conferir fala ou imagem. A tela seguiu ligada o tempo todo, então a exportação com tela apagada segue sem teste.
+Saída H.264 2560x1280: 9.805 quadros, igual à entrada; sem intervalos acima de 0,042 s; vídeo com 408,54 s e áudio com 408,53 s; metadados esféricos presentes; decodificação sem erros no PC; sem crash. Isso substitui o critério de 10 min do M2, com três ressalvas: a duração foi 6 min 48 s, o vídeo foi recodificado, e o sincronismo foi verificado por carimbos de tempo, sem conferir fala ou imagem. A tela seguiu ligada o tempo todo no teste anterior. Implementado em `VideoStudioScreen.kt`: `keepScreenOn` enquanto a tela de exportação estiver aberta, `WakeLock` (`PARTIAL_WAKE_LOCK`) e `TransferService` (Foreground Service) durante `VideoStitcher.export` para manter a CPU ativa e o processo em primeiro plano mesmo se o usuário apagar a tela ou trocar de app.
 
 ### Importação e emenda, 2026-11-07
 

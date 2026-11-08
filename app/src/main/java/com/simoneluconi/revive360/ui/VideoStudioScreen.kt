@@ -6,6 +6,9 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.media.MediaPlayer
+import android.os.PowerManager
+import androidx.compose.ui.platform.LocalView
+import com.simoneluconi.revive360.link.TransferService
 import android.view.Surface
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -121,6 +124,15 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
 
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
+
+    val currentView = LocalView.current
+    DisposableEffect(exporting) {
+        val prev = currentView.keepScreenOn
+        currentView.keepScreenOn = exporting || prev
+        onDispose {
+            currentView.keepScreenOn = prev
+        }
+    }
 
     val gpxPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -567,6 +579,10 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                         val suffix = if (chosenPreset == AspectPreset.EQUIRECT_360) "_360.mp4" else "_${chosenPreset.name.lowercase()}.mp4"
                         val outName = "$baseName$suffix"
                         val outFile = File(context.cacheDir, outName)
+                        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                        val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Gear360Alive:VideoExport")
+                        wakeLock?.acquire(20 * 60 * 1000L) // 20 min safety limit
+                        TransferService.set(context, on = true)
                         try {
                             withContext(Dispatchers.Default) {
                                 VideoStitcher.export(
@@ -594,6 +610,10 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                             EventLog.log("Video export failed: $e")
                             nav.message("Export failed: ${e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName}. The original is safe.", MessageKind.BAD)
                         } finally {
+                            runCatching {
+                                if (wakeLock?.isHeld == true) wakeLock.release()
+                            }
+                            TransferService.set(context, on = false)
                             outFile.delete()
                             exporting = false
                         }
