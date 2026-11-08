@@ -299,6 +299,8 @@
     <string name="export_not_dual">Questo video non ha nulla da unire: usa un solo obiettivo o è già unito.</string>
     <string name="export_no_encoder">Questo dispositivo non ha un codificatore per questa esportazione.</string>
     <string name="export_beyond_decoder">Questo dispositivo dichiara meno di quanto richiede il video. L\'esportazione può non riuscire; l\'originale resta al sicuro.</string>
+    <string name="video_4k_unsupported_title">Riproduzione 4K non disponibile</string>
+    <string name="video_4k_unsupported_desc">Questo dispositivo non supporta la decodifica hardware di video 4K HEVC (4096x2048).\n\n- Originale al sicuro.\n- Registra a 2560x1280 per modificare su questo dispositivo.\n- Elabora il 4K su PC o dispositivo compatibile.</string>
     <string name="export_reduced">Questo dispositivo esporterà a %1$dx%2$d.</string>
     <string name="export_slow">Questa esportazione durerà più del video.</string>
 

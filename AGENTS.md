@@ -86,7 +86,9 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 4. Costura comparada (2026-11-07): Câmera OSC (5472x2736 crop) vs App (5792x2896 nativo integral OCamCalib) vs ActionDirector (5472x2736). Qualidade alinhada a >1,5 m; mesa próxima sofre paralaxe física inevitável em todas.
 5. Layout de `livestream_bc_high.avi` entendido (2026-11-07): `00VR` é chunk AVI de 32 bytes (4 pares racionais num/den), sem os 8 bytes de timestamp de `00VD`/`00AU`. `livestream_high.avi` (1280x640 JPEG puro a 11 Mbps) mantido como padrão do app.
 6. Exportação em segundo plano/tela apagada implementada (WakeLock + Foreground TransferService + keepScreenOn durante exportação).
-7. Pendências M2 restantes: faixa escura no vídeo (queda de luz/OPAI); leitor de cartão real; preview de 4K; confirmar foto no Google Photos.
+7. Faixa escura no vídeo corrigida (OPAI R210: curva exponencial strength=1.06 / power=3.0 ajustada ao polinômio de fábrica).
+8. Preview de 4K tratado (overlay explicativo claro e seguro quando o hardware não decodifica 4K HEVC).
+9. Pendências M2 restantes: leitor de cartão real; confirmar foto no Google Photos.
 
 ### Correções a este arquivo
 

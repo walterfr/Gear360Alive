@@ -235,6 +235,8 @@ object CameraMetadata {
             val model = base.copy(
                 focal = R210_FOCAL,
                 lensPoly = R210_POLY,
+                vignetteStrength = DualFisheye.R210_VIGNETTE_STRENGTH,
+                vignettePower = DualFisheye.R210_VIGNETTE_POWER,
                 frontCenterX = leftCx / R210_OPAX_SIDE,
                 frontCenterY = leftCy / R210_OPAX_SIDE,
                 backCenterX = rightCx / R210_OPAX_SIDE,

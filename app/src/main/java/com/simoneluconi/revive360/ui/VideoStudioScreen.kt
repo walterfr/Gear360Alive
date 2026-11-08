@@ -122,6 +122,7 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
     val keyframes = remember { mutableStateListOf<Keyframe>() }
     var sphereView by remember { mutableStateOf<SphereVideoView?>(null) }
 
+    var playbackError by remember { mutableStateOf<String?>(null) }
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
 
@@ -250,6 +251,7 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
 
     // What this device can do with this file, for the chosen output (null: not read yet)
     var decision by remember { mutableStateOf<ProcessingDecision?>(null) }
+    val is4kBlocked = decision?.kind == ProcessingDecision.Kind.BEYOND_DECLARED_DECODER || playbackError != null
     LaunchedEffect(localFile, preset) {
         val src = localFile ?: return@LaunchedEffect
         val equirect = preset == AspectPreset.EQUIRECT_360
@@ -289,16 +291,29 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
 
     fun startPlaybackOn(surface: Surface, file: File) {
         runCatching { player?.release() }
-        val mp = MediaPlayer().apply {
-            setDataSource(file.path)
-            setSurface(surface)
-            isLooping = true
-            prepare()
-            durationMs = duration.toLong().coerceAtLeast(1L)
-            start()
+        try {
+            val mp = MediaPlayer().apply {
+                setDataSource(file.path)
+                setSurface(surface)
+                isLooping = true
+                setOnErrorListener { _, what, extra ->
+                    EventLog.log("Video player error: what=$what extra=$extra")
+                    playbackError = "Playback unsupported on this device ($what, $extra)"
+                    playing = false
+                    true
+                }
+                prepare()
+                durationMs = duration.toLong().coerceAtLeast(1L)
+                start()
+            }
+            player = mp
+            playing = true
+            playbackError = null
+        } catch (e: Exception) {
+            EventLog.log("Video player prepare failed: $e")
+            playbackError = e.message ?: "Failed to prepare playback"
+            playing = false
         }
-        player = mp
-        playing = true
     }
 
     ScreenScaffold(title = title, scroll = false) {
@@ -373,12 +388,40 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
             } else {
                 Label(error!!, color = colors.bad)
             }
+
+            val is4kUnsupported = decision?.kind == ProcessingDecision.Kind.BEYOND_DECLARED_DECODER || playbackError != null
+            if (is4kUnsupported && readyFile != null) {
+                Card(
+                    Modifier
+                        .align(Alignment.Center)
+                        .padding(24.dp)
+                        .fillMaxWidth(0.92f)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(16.dp),
+                    ) {
+                        Label(
+                            stringResource(R.string.video_4k_unsupported_title),
+                            size = 16.sp,
+                            weight = FontWeight.Bold,
+                            color = colors.text,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Label(
+                            stringResource(R.string.video_4k_unsupported_desc),
+                            size = 13.sp,
+                            color = colors.text2,
+                        )
+                    }
+                }
+            }
         }
 
         // Timeline scrubber & Keyframe controls
         Card(Modifier.fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PillButton(if (playing) "Pause" else "Play", enabled = localFile != null && !exporting) {
+                PillButton(if (playing) "Pause" else "Play", enabled = localFile != null && !exporting && !is4kBlocked) {
                     val mp = player ?: return@PillButton
                     if (playing) {
                         mp.pause()
@@ -395,7 +438,7 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                     color = colors.text2,
                     mono = true,
                 )
-                PillButton("+ Keyframe", enabled = localFile != null && !exporting) {
+                PillButton("+ Keyframe", enabled = localFile != null && !exporting && !is4kBlocked) {
                     val sv = sphereView
                     val v = sv?.view ?: ViewState()
                     val kf = Keyframe(
@@ -560,7 +603,7 @@ fun VideoStudioScreen(path: String? = null, phoneItem: PhoneItem? = null) {
                     Modifier.fillMaxWidth(),
                     icon = AppIcons.Video,
                     style = ButtonStyle.PRIMARY,
-                    enabled = localFile != null && decision?.canExport == true,
+                    enabled = localFile != null && decision?.canExport == true && !is4kBlocked,
                 ) {
                     val src = localFile ?: return@PillButton
                     val output = decision ?: return@PillButton

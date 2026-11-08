@@ -301,6 +301,8 @@
     <string name="export_not_dual">This video has nothing to stitch: it uses one lens or is already stitched.</string>
     <string name="export_no_encoder">This device has no encoder for this export.</string>
     <string name="export_beyond_decoder">This device declares less than this video needs. The export may fail; the original stays safe.</string>
+    <string name="video_4k_unsupported_title">4K Playback Unavailable</string>
+    <string name="video_4k_unsupported_desc">This device cannot decode 4K HEVC video (4096x2048) in hardware.\n\n- The original is safe on storage.\n- Record in 2560x1280 to edit on this device.\n- Process 4K on a PC or 4K-capable device.</string>
     <string name="export_reduced">This device will export at %1$dx%2$d.</string>
     <string name="export_slow">This export will take longer than the video.</string>
 

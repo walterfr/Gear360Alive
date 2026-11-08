@@ -85,6 +85,13 @@ data class DualFisheye(
          */
         const val C200_VIGNETTE_STRENGTH = 0.28f
         const val C200_VIGNETTE_POWER = 8f
+
+        /**
+         * The SM-R210's lens shading (OPAI polynomial in MakerNote 0x0013): fitted exponential
+         * curve compensating the edge fall-off (up to 2.94x at the circle edge).
+         */
+        const val R210_VIGNETTE_STRENGTH = 1.06f
+        const val R210_VIGNETTE_POWER = 3.0f
     }
 }
 

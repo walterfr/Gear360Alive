@@ -33,6 +33,8 @@ class CameraMetadataTest {
         assertEquals(1446f / 2896f, parsed.backCenterX, 1e-5f)
         assertEquals(1452f / 2896f, parsed.backCenterY, 1e-5f)
         assertEquals(0.5f * Math.toRadians(0.75).toFloat(), parsed.backRoll, 1e-5f)
+        assertEquals(DualFisheye.R210_VIGNETTE_STRENGTH, parsed.vignetteStrength, 1e-5f)
+        assertEquals(DualFisheye.R210_VIGNETTE_POWER, parsed.vignettePower, 1e-5f)
     }
 
     @Test
