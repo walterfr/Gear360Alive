@@ -16,21 +16,22 @@ Referência técnica para transformar a Samsung Gear 360 em uma câmera moderna 
 
 ---
 
-## 0. Estado atual e como continuar (2026-11-07)
+## 0. Estado atual e como continuar (2026-11-08)
 
 Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, seção 13.
 
 ### Repositório
 
 - Branch única: `main` (`origin`, `walterfr/Gear360Alive`). A antiga `m0-stock-first` foi mesclada por fast-forward e apagada em 2026-11-07; o instalador de firmware antigo saiu da `main`.
-- Commits desde `6f27c5c`: `8212912` (M0, sondas, plano), `4523c46` (importação, `ProcessingPolicy`, `DeviceCodecs`), `c874662` (`StockClient`, tela de status, OPAX/vrot, fotos de uma lente), `c7821c9` (preview ao vivo, costura com polinômio de lente, importação de pasta, Share), `7d19fca` (Wi-Fi em baixa latência, medição de atraso, `--stream`), `72f281e`/`b00c9f6` (este arquivo), `7f504bd` (foto remota por OSC, `osc_step.py`) e o commit desta atualização.
-- Testes: `./gradlew :app:testDebugUnitTest` (80 testes, 0 falhas, 1 ignorado). `StockSafetyTest` falha se `Features.EXPERIMENTAL` for `true`: é proposital, para nada ir ao commit com a opção ligada.
+- Branch única: `main`, sincronizada com `origin/main`; árvore limpa na revisão de 2026-11-08. Último commit: `d176108` (correção de preview 4K e compensação de luz das lentes R210). Não criar outra branch sem pedido do dono.
+- Testes registrados: `./gradlew :app:testDebugUnitTest` passou com 80 testes, 0 falhas e 1 ignorado antes dos commits mais recentes. Reexecutar após mudanças de código; não presumir contagem atual. `StockSafetyTest` exige `Features.EXPERIMENTAL = false` no estado final.
 - APK de teste para o tablet: troque `EXPERIMENTAL` para `true` em `ui/Features.kt`, rode `./gradlew :app:assembleDebug`, devolva a `false` e instale `app/build/outputs/apk/debug/app-debug.apk` com `adb -s <serial> install -r`.
 
 ### Como trabalhar com o dono
 
 - Respostas em português, curtas. Commit só quando o dono pedir; push e merge também.
 - Cada comando novo à câmera: preparar com dry run e self-test, mostrar exatamente o que será enviado e o risco, esperar "Sim, enviar", enviar **uma vez**, registrar o resultado em `docs/PLANO.md`, seção 13.
+- Comandos já aprovados para uso no app não autorizam experimentos novos. Captura, troca de modo e qualquer comando que possa alterar estado exigem aprovação específica na conversa.
 - O dono opera a câmera e o tablet; pergunte o que a tela da câmera mostrou quando importar.
 - Amostras reais ficam em `100PHOTO/` (fora do git). O APK oficial (`com.samsung.android.samsunggear360manager_1.0.22-43...apk`) está na raiz, fora do git: só extrair fatos técnicos, nunca copiar código Samsung nem executá-lo.
 
@@ -80,15 +81,32 @@ Leia esta seção primeiro. Detalhes de cada teste estão em `docs/PLANO.md`, se
 
 ### Próximos passos
 
-1. **Foto remota pelo OSC liberada no app** (validada em câmera e tablet com `SAM_0307.JPG` e no visualizador 360). Falta repetir com mais disparos seguidos para o critério do M3.
-2. Repetir o preview mais longo para ver se a queda de vazão após 15 s se repete; se sim, investigar o Wi-Fi da câmera.
-3. Tirar o preview de trás de `EXPERIMENTAL` quando a queda de vazão estiver explicada.
-4. Costura comparada (2026-11-07): Câmera OSC (5472x2736 crop) vs App (5792x2896 nativo integral OCamCalib) vs ActionDirector (5472x2736). Qualidade alinhada a >1,5 m; mesa próxima sofre paralaxe física inevitável em todas.
-5. Layout de `livestream_bc_high.avi` entendido (2026-11-07): `00VR` é chunk AVI de 32 bytes (4 pares racionais num/den), sem os 8 bytes de timestamp de `00VD`/`00AU`. `livestream_high.avi` (1280x640 JPEG puro a 11 Mbps) mantido como padrão do app.
-6. Exportação em segundo plano/tela apagada implementada (WakeLock + Foreground TransferService + keepScreenOn durante exportação).
-7. Faixa escura no vídeo corrigida (OPAI R210: curva exponencial strength=1.06 / power=3.0 ajustada ao polinômio de fábrica).
-8. Preview de 4K tratado (overlay explicativo claro e seguro quando o hardware não decodifica 4K HEVC).
-9. Pendências M2 restantes: leitor de cartão real; confirmar foto no Google Photos.
+1. **Fechar validação do fluxo principal:** testar importação por leitor de cartão OTG e confirmar que foto e vídeo exportados abrem como 360 no Google Photos/YouTube. Preservar originais e comparar hashes.
+2. **Estabilizar o preview:** repetir sessão mais longa e medir quadros/s, atraso e quedas; verificar especialmente a queda observada após ~15 s com Wi-Fi de baixa latência. Não liberar de `Features.EXPERIMENTAL` até haver sessão longa estável e encerramento/reconexão previsíveis.
+3. **Tornar o caminho de foto mais simples:** reduzir a fricção entre conectar no modo Street View (OSC), capturar, baixar e abrir/compartilhar; deixar explícito que OSC produz foto já costurada e não oferece vídeo.
+4. **Completar o fluxo de mídia local:** importação resiliente de pastas/cartão, progresso/cancelamento e recuperação após sair do app. Já há importação em segundo plano, mas ainda falta cancelamento e validação com leitor real.
+5. **Qualidade e compatibilidade:** conferir OPAI contra cenas sem pessoas identificáveis, validar em mais de uma distância e testar em outro Android antes de generalizar a calibração desta unidade. Manter saída 2560x1280 como caminho garantido no tablet; tratar 4K com aviso e alternativa segura.
+6. **Confiabilidade para distribuição:** checar acessibilidade e textos em português, fluxo de permissões/rede, falhas sem arquivo parcial, CI, licença/avisos e instruções de instalação. Só então preparar APK de release assinado fora do repositório.
+
+### Avaliação do estágio e direção do produto
+
+- **Já entrega valor:** status da câmera no firmware original; foto remota OSC já costurada e baixada para o tablet; importação de fotos/vídeos, stitch local com calibração R210, exportação GPano/360 e compartilhamento. A câmera permanece no firmware original. Comparação visual com ActionDirector foi considerada boa em cenas a mais de ~1,5 m; paralaxe em objetos próximos é limite óptico.
+- **Ainda experimental:** preview ao vivo (funciona, mas a taxa/latência degrada em sessões longas); recursos avançados de vídeo e estabilização. `vrot` do R210 não traz yaw nas amostras analisadas; não prometer FlowState. `Features.EXPERIMENTAL` deve ficar `false` por padrão.
+- **Limites do hardware testado:** Lenovo TB361FU não decodifica HEVC 4K; 2560x1280@30 é o alvo confiável conhecido. Isso é limite do tablet, não da câmera nem de todos os Androids.
+- **Sem controle remoto de vídeo validado:** OSC testado só para foto. SOAP `Shot` travou o serviço uma vez e continua suspenso. Não testar gravação remota nem reativar `Shot` sem hipótese clara, preparação, aprovação específica e plano de recuperação.
+- **Ordem de produto recomendada:** (1) experiência simples e confiável para importar → costurar → visualizar/compartilhar; (2) captura de foto OSC guiada; (3) estabilizar preview; (4) ampliar formatos/dispositivos; (5) só então investigar captura remota de vídeo e recursos avançados.
+- **Evitar por enquanto:** firmware modificado, escrita no cartão, IA de rastreamento, HDR/bracketing não testado, streaming para OBS e controles remotos presumidos. A câmera é única e a prioridade é preservá-la.
+
+### Quedas em “Connect to iOS”: diagnóstico e melhorias
+
+- **Ainda sem causa única confirmada.** Já houve queda de rede antes de comandos SOAP e queda durante preview; também há desligamento automático configurado em `5min`, queda temporária de serviços após `UNSUBSCRIBE` e relato de o PC perder a conexão quando o tablet entra na rede. São eventos diferentes até prova em contrário.
+- Distinguir sempre: (1) câmera deixou de anunciar o SSID; (2) tablet perdeu a rede Wi-Fi; (3) Wi-Fi segue ligado, mas serviço/porta da câmera parou; (4) só o app perdeu a sessão. Não chamar todos de “câmera desconectou”.
+- Próximo teste deve registrar horário e, se possível por ADB USB, `NetworkCallback` (`onAvailable`/`onLost`), SSID/BSSID, rota/IP, ping para `192.168.43.1`, falhas/latência de cada endpoint e estado/tela da câmera. Não registrar senha, número de série, `OpaiData` nem conteúdo de mídia.
+- Repetir comparando **um cliente por vez** (PC ou tablet), câmera carregada e parada, com a tela da câmera visível. Observar se a rede cai perto do `AutoPowerOffValue=5min`; não alterar esse ajuste sem aprovação. Depois comparar preview com Wi-Fi normal e `WIFI_MODE_FULL_LOW_LATENCY` em sessões separadas.
+- A documentação Android diz que `WifiNetworkSpecifier` é uma conexão local sem internet e pode coexistir como rede secundária; usar sockets presos explicitamente à `Network` da câmera e não depender da rota padrão/internet. A chamada `onLost` deve atualizar a UI. A conexão secundária não prova que o AP da câmera aceita vários clientes.
+- `WIFI_MODE_FULL_LOW_LATENCY` prioriza latência enquanto o app está em primeiro plano e a tela ligada; pode reduzir throughput, bateria e frequência de varredura. Como o stream `high` usa ~11 Mbps, não presumir que esse lock melhora sessões longas: medir quedas, atraso e vazão com e sem ele.
+- Melhorias de app recomendadas: estado de conexão por camada (“Wi-Fi conectada”, “câmera responde”, “sessão/preview ativo”); horário e causa da última falha; teste de saúde somente leitura; encerramento explícito da sessão; reconexão com espera crescente e limite, sem repetir comandos de captura nem reabrir stream automaticamente; instrução clara quando a câmera precisa voltar ao menu Connect.
+- Só liberar preview experimental depois de validar sessões repetidas e longas, recuperação após `onLost`, e confirmação de que o app não deixa a câmera presa. Enquanto não houver essa evidência, oferecer importação/local stitch como caminho confiável.
 
 ### Correções a este arquivo
 
