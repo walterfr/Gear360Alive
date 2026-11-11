@@ -565,6 +565,21 @@ Medido o comportamento do desligamento automático (`AutoPowerOffValue = 5min`) 
   1. A câmera declara suporte a `AutoPowerOffValue` de `1min`, `3min`, `5min` e `15min`. Ajustar para `15min` (pelo menu físico ou comando seguro) triplica a autonomia antes do repouso.
   2. O app detecta a desconexão perto de 5 min e orienta o usuário: *"Câmera entrou em repouso por inatividade (5 min). Pressione o botão para religar."*
 
+### Fase 3: Validação de changeToML, Galeria e Download Sem Fio, 2026-11-11
+
+Testada a comutação oficial para o modo Media List via SOAP:
+- **Sequência aprovada e validada:**
+  1. `SUBSCRIBE` na porta 7676 (`/smp_5_`).
+  2. `SetOperationState` com `<StateEvent>changeToML</StateEvent>` (resposta HTTP 200).
+  3. Espera de 3 segundos para montagem dos endpoints DLNA pela câmera.
+  4. `Browse` no contêiner `8` (`AllMedia`): **retornou todos os 28 arquivos do cartão SD** (fotos 360 do botão, fotos OSC costuradas e vídeos MP4).
+- **Descoberta fundamental de URLs e portas:**
+  - Os arquivos de mídia **são servidos na porta 7679** (e não na 9001), sob caminhos dinâmicos gerados pelo DLNA da câmera (ex.: `http://192.168.43.1:7679/smp01380130001000314.mp4`).
+  - Para cada item, a câmera expõe 3 recursos: original integral (`smp...`), miniatura rápida (`smpthumb...`) e visualização em tela (`smpscreen...`).
+- **Download sem fio testado:**
+  - Baixado o vídeo `360_0314.mp4` (911.012 bytes) com HTTP GET padrão em **0,23 s (~30 Mbps)** com SHA-256 verificado.
+- **Impacto no produto:** Desbloqueia a galeria sem fio completa no app. O usuário pode visualizar miniaturas e baixar fotos/vídeos originais da Gear 360 sem precisar remover o cartão de memória.
+
 ### Pendências
 
 - Rodar nos modos "Connect to Android" e "Connect to Street View" (baixa prioridade: o caminho principal já responde).
