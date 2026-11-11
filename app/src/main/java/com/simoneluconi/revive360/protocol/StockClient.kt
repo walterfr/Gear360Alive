@@ -68,6 +68,7 @@ class StockClient(
 
     /**
      * Active media session handle. Keeps ML mode alive while the user browses and downloads files.
+     * [close] sends UNSUBSCRIBE and blocks until it is answered or times out: call it off the main thread.
      */
     class MediaSession internal constructor(
         val items: List<StockMediaItem>,
@@ -99,10 +100,9 @@ class StockClient(
             val answer = post("Browse", browseArgs)
             val items = parseBrowseItems(answer)
             val sessionSid = sid
+            val ended = AtomicBoolean(false)
             return MediaSession(items) {
-                thread(name = "stock-ml-end", isDaemon = true) {
-                    end(sessionSid, listener)
-                }
+                if (ended.compareAndSet(false, true)) end(sessionSid, listener)
             }
         } catch (e: Exception) {
             end(sid, listener)
@@ -114,7 +114,7 @@ class StockClient(
      * Downloads a file from the camera's streaming server (port 7679) to [dest].
      */
     fun download(mediaUrl: String, dest: File, onProgress: (bytesDownloaded: Long, totalBytes: Long) -> Unit = { _, _ -> }) {
-        val connection = connector.open(URL(mediaUrl)).apply {
+        val connection = connector.open(cameraUrl(mediaUrl)).apply {
             connectTimeout = TIMEOUT_MS
             readTimeout = 30_000
             setRequestProperty("User-Agent", STOCK_USER_AGENT)
@@ -146,6 +146,28 @@ class StockClient(
             connection.disconnect()
         }
     }
+
+    /**
+     * Fetches a thumbnail bytes buffer from the camera's streaming server (port 7679).
+     */
+    fun fetchThumbnail(thumbUrl: String): ByteArray? = runCatching {
+        val connection = connector.open(cameraUrl(thumbUrl)).apply {
+            connectTimeout = 3_000
+            readTimeout = 5_000
+            setRequestProperty("User-Agent", STOCK_USER_AGENT)
+            setRequestProperty("Access-Method", "manual")
+            setRequestProperty("Connection", "close")
+        }
+        try {
+            if (connection.responseCode in 200..206) connection.inputStream.readBytes() else null
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrNull()
+
+    /** The addresses in a Browse answer come from the camera: only the camera itself is fetched. */
+    private fun cameraUrl(url: String): URL =
+        URL(url).also { if (it.host != host) throw IOException("not the camera's address: ${it.host}") }
 
     /** The first request after a pause has answered 503 on the SM-R210, and the description then answers. */
     private fun wake() {

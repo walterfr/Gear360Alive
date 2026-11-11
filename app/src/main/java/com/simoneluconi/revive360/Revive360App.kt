@@ -36,8 +36,14 @@ class Revive360App : Application() {
         // On the camera's Wi-Fi while the app is on screen, off it shortly after (battery, and the
         // phone's own Wi-Fi comes back)
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) = controller.onForeground()
-            override fun onStop(owner: LifecycleOwner) = controller.onBackground()
+            override fun onStart(owner: LifecycleOwner) {
+                controller.onForeground()
+                stockController.onForeground()
+            }
+            override fun onStop(owner: LifecycleOwner) {
+                controller.onBackground()
+                stockController.onBackground()
+            }
         })
     }
 }

@@ -1,16 +1,23 @@
 package com.simoneluconi.revive360.ui
 
+import android.graphics.BitmapFactory
 import android.net.wifi.WifiManager
 import android.view.Surface
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +36,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +56,7 @@ import com.simoneluconi.revive360.link.StockMode
 import com.simoneluconi.revive360.link.WifiLayerState
 import com.simoneluconi.revive360.media.LiveViewDecoder
 import com.simoneluconi.revive360.media.MediaSaver
+import com.simoneluconi.revive360.media.PhoneMedia
 import com.simoneluconi.revive360.protocol.FileKind
 import com.simoneluconi.revive360.protocol.LiveStream
 import com.simoneluconi.revive360.protocol.OscStatus
@@ -88,19 +99,8 @@ fun StockCameraScreen() {
     var shotMessage by remember { mutableStateOf<String?>(null) }
     var shotError by remember { mutableStateOf<String?>(null) }
 
-    var mediaSession by remember { mutableStateOf<StockClient.MediaSession?>(null) }
-    var mediaList by remember { mutableStateOf<List<StockMediaItem>?>(null) }
-    var loadingMedia by remember { mutableStateOf(false) }
-    var downloadingName by remember { mutableStateOf<String?>(null) }
-    var downloadMessage by remember { mutableStateOf<String?>(null) }
-    var downloadError by remember { mutableStateOf<String?>(null) }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            mediaSession?.close()
-            mediaSession = null
-        }
-    }
+    // The gallery's session belongs to the controller; leaving the screen ends it (after a download in progress)
+    DisposableEffect(Unit) { onDispose { controller.closeMedia() } }
 
     val activeMode = state.mode
     val isOsc = activeMode == StockMode.OSC
@@ -118,7 +118,6 @@ fun StockCameraScreen() {
                         controller.setMode(StockMode.IOS)
                         shotMessage = null
                         shotError = null
-                        mediaList = null
                     }
                 }
                 Chip(stringResource(R.string.stock_mode_osc), selected = isOsc) {
@@ -126,7 +125,6 @@ fun StockCameraScreen() {
                         controller.setMode(StockMode.OSC)
                         shotMessage = null
                         shotError = null
-                        mediaList = null
                     }
                 }
             }
@@ -168,7 +166,6 @@ fun StockCameraScreen() {
                 ) {
                     shotMessage = null
                     shotError = null
-                    mediaList = null
                     controller.connect()
                 }
 
@@ -274,36 +271,36 @@ fun StockCameraScreen() {
             }
 
             val camera = controller.stockClient
+            if (session is SessionLayerState.CoolingDown) {
+                Card {
+                    Label(
+                        stringResource(R.string.stock_cooldown_countdown, session.secondsRemaining),
+                        size = 14.sp,
+                        color = colors.text2
+                    )
+                }
+            }
             if (camera != null) {
                 // Card for Wireless Media Gallery / Download
                 Card {
-                    val currentItems = mediaList
+                    val currentItems = state.media
+                    val downloadingName = state.downloading
                     if (currentItems == null) {
                         PillButton(
-                            stringResource(if (loadingMedia) R.string.stock_gallery_loading else R.string.stock_gallery_btn),
+                            stringResource(if (state.mediaLoading) R.string.stock_gallery_loading else R.string.stock_gallery_btn),
                             Modifier.fillMaxWidth(),
                             icon = AppIcons.Gallery,
                             style = ButtonStyle.SECONDARY,
-                            enabled = !loadingMedia && !isLive,
-                        ) {
-                            loadingMedia = true
-                            downloadMessage = null
-                            downloadError = null
-                            controller.setSessionState(SessionLayerState.MediaLibrary)
-                            scope.launch {
-                                try {
-                                    val session = withContext(Dispatchers.IO) { camera.openMediaSession() }
-                                    mediaSession = session
-                                    mediaList = session.items
-                                } catch (e: Exception) {
-                                    if (e is CancellationException) throw e
-                                    EventLog.log("Stock list media error: ${e.message}")
-                                    downloadError = e.message ?: e.javaClass.simpleName
-                                    controller.setSessionState(SessionLayerState.Idle)
-                                } finally {
-                                    loadingMedia = false
-                                }
-                            }
+                            // Only from idle: the camera holds one session at a time
+                            enabled = session is SessionLayerState.Idle && !state.mediaLoading,
+                        ) { controller.openMedia() }
+                        if (downloadingName != null) {
+                            Spacer(Modifier.height(8.dp))
+                            Label(
+                                stringResource(R.string.stock_gallery_downloading, downloadingName),
+                                size = 13.sp,
+                                color = colors.accent
+                            )
                         }
                     } else {
                         Label(
@@ -312,65 +309,68 @@ fun StockCameraScreen() {
                             weight = FontWeight.Bold
                         )
                         Spacer(Modifier.height(8.dp))
+                        val savedItems = remember(currentItems, downloadingName) {
+                            runCatching { PhoneMedia.list(context).map { it.name }.toSet() }.getOrDefault(emptySet())
+                        }
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            currentItems.take(15).forEach { item ->
+                            // ponytail: one Browse page (100 files); page with StartingIndex when a card holds more
+                            currentItems.forEach { item ->
+                                val isDownloaded = item.title in savedItems
+                                val isCurDownloading = downloadingName == item.title
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
-                                        .clickable(enabled = downloadingName == null) {
-                                            downloadingName = item.title
-                                            downloadMessage = null
-                                            downloadError = null
-                                            scope.launch {
-                                                val tmp = File(context.cacheDir, "stock_dl_${item.title}")
-                                                try {
-                                                    withContext(Dispatchers.IO) {
-                                                        camera.download(item.mediaUrl, tmp)
-                                                        MediaSaver.publish(
-                                                            context,
-                                                            item.title,
-                                                            item.kind,
-                                                            if (item.kind == FileKind.VIDEO) "video/mp4" else "image/jpeg",
-                                                            System.currentTimeMillis() / 1000L,
-                                                            tmp
-                                                        )
-                                                    }
-                                                    downloadMessage = context.getString(
-                                                        R.string.stock_gallery_downloaded,
-                                                        item.title,
-                                                        MediaSaver.FOLDER
-                                                    )
-                                                } catch (e: Exception) {
-                                                    if (e is CancellationException) throw e
-                                                    downloadError = e.message ?: e.javaClass.simpleName
-                                                } finally {
-                                                    tmp.delete()
-                                                    downloadingName = null
-                                                }
-                                            }
-                                        }
+                                        .clickable(enabled = downloadingName == null) { controller.download(item) }
                                         .padding(vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    val isCurDownloading = downloadingName == item.title
-                                    Label(
-                                        if (isCurDownloading) stringResource(R.string.stock_gallery_downloading, item.title) else item.title,
-                                        modifier = Modifier.weight(1f),
-                                        size = 14.sp,
-                                        color = if (isCurDownloading) colors.accent else colors.text
-                                    )
-                                    Label(
-                                        if (item.sizeBytes > 0) "${item.sizeBytes / (1024 * 1024)} MB" else "",
-                                        size = 12.sp,
-                                        color = colors.text2
-                                    )
+                                    StockMediaThumbnail(controller, item)
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Label(
+                                            if (isCurDownloading) stringResource(R.string.stock_gallery_downloading, item.title) else item.title,
+                                            size = 14.sp,
+                                            color = if (isCurDownloading) colors.accent else colors.text
+                                        )
+                                        if (item.sizeBytes > 0) {
+                                            Label(
+                                                "${item.sizeBytes / (1024 * 1024)} MB",
+                                                size = 12.sp,
+                                                color = colors.text2
+                                            )
+                                        }
+                                    }
+                                    if (isDownloaded) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(colors.good.copy(alpha = 0.15f))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Icon(AppIcons.Check, color = colors.good, size = 14.dp)
+                                            Label(
+                                                stringResource(R.string.stock_gallery_already_saved),
+                                                size = 11.sp,
+                                                color = colors.good,
+                                                weight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
+                        Spacer(Modifier.height(10.dp))
+                        PillButton(
+                            stringResource(R.string.stock_gallery_close),
+                            Modifier.fillMaxWidth(),
+                            icon = AppIcons.Close,
+                        ) { controller.closeMedia() }
                     }
-                    val msg = downloadMessage
-                    val err = downloadError
+                    val msg = state.lastDownloaded?.let { stringResource(R.string.stock_gallery_downloaded, it, MediaSaver.FOLDER) }
+                    val err = state.mediaError
                     if (msg != null) {
                         Spacer(Modifier.height(8.dp))
                         Label(msg, size = 13.sp, color = colors.good)
@@ -387,15 +387,8 @@ fun StockCameraScreen() {
                     StockPreview(camera) {
                         controller.startCooldown(seconds = 60)
                     }
-                } else if (session is SessionLayerState.CoolingDown) {
-                    Card {
-                        Label(
-                            stringResource(R.string.stock_cooldown_countdown, session.secondsRemaining),
-                            size = 14.sp,
-                            color = colors.text2
-                        )
-                    }
-                } else {
+                } else if (session is SessionLayerState.Idle) {
+                    // Only from idle: never over an open gallery session
                     Card {
                         PillButton(
                             stringResource(R.string.stock_preview),
@@ -414,6 +407,14 @@ fun StockCameraScreen() {
                     }
                 }
             }
+        }
+
+        if (isConnected && !isLive && !shooting) {
+            PillButton(
+                stringResource(R.string.stock_disconnect),
+                Modifier.fillMaxWidth(),
+                icon = AppIcons.Close,
+            ) { controller.disconnect() }
         }
     }
 }
@@ -535,6 +536,42 @@ private class StockLiveSession(private val camera: StockClient) {
 
     private companion object {
         const val STOP_WAIT_MS = 2_000L
+    }
+}
+
+@Composable
+private fun StockMediaThumbnail(controller: StockCameraController, item: StockMediaItem) {
+    val colors = LocalAppColors.current
+    var bitmap by remember(item.thumbUrl) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(item.thumbUrl) {
+        // The controller fetches them one at a time and keeps them while the gallery is open
+        val bytes = controller.thumbnail(item)
+        if (bytes != null) {
+            bitmap = withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
+        }
+    }
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(colors.surface2),
+        contentAlignment = Alignment.Center
+    ) {
+        val img = bitmap
+        if (img != null) {
+            Image(
+                bitmap = img,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Icon(
+                if (item.kind == FileKind.VIDEO) AppIcons.Video else AppIcons.Photo,
+                color = colors.text2,
+                size = 20.dp
+            )
+        }
     }
 }
 

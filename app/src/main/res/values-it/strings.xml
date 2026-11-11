@@ -334,6 +334,9 @@
     <string name="stock_gallery_loading">Ricerca file sulla fotocamera via Wi-Fi…</string>
     <string name="stock_gallery_downloading">Scaricamento %1$s…</string>
     <string name="stock_gallery_downloaded">Salvato %1$s in %2$s</string>
+    <string name="stock_gallery_already_saved">Scaricato</string>
+    <string name="stock_gallery_close">Chiudi la galleria</string>
+    <string name="stock_disconnect">Disconnetti dalla fotocamera</string>
     <string name="import_folder">Importa cartella</string>
     <string name="import_listing">Ricerca di foto e video…</string>
     <string name="import_failed">Impossibile leggere la cartella. La scheda è ancora collegata?</string>

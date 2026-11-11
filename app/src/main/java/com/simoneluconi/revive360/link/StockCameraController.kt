@@ -3,10 +3,13 @@ package com.simoneluconi.revive360.link
 import android.content.Context
 import android.net.Network
 import com.simoneluconi.revive360.EventLog
+import com.simoneluconi.revive360.media.MediaSaver
 import com.simoneluconi.revive360.protocol.Connector
+import com.simoneluconi.revive360.protocol.FileKind
 import com.simoneluconi.revive360.protocol.OscClient
 import com.simoneluconi.revive360.protocol.OscStatus
 import com.simoneluconi.revive360.protocol.StockClient
+import com.simoneluconi.revive360.protocol.StockMediaItem
 import com.simoneluconi.revive360.protocol.StockStatus
 import com.simoneluconi.revive360.settings.AppSettings
 import kotlinx.coroutines.CancellationException
@@ -21,11 +24,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.IOException
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
-import java.net.Socket
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.concurrent.thread
 
 enum class StockMode {
     IOS,
@@ -60,7 +66,14 @@ data class StockCameraState(
     val wifi: WifiLayerState = WifiLayerState.Disconnected,
     val health: CameraHealthState = CameraHealthState.Unknown,
     val session: SessionLayerState = SessionLayerState.Idle,
-    val lastDropReason: String? = null
+    val lastDropReason: String? = null,
+    /** The camera's files while its gallery is open; null when it is closed. */
+    val media: List<StockMediaItem>? = null,
+    val mediaLoading: Boolean = false,
+    /** The title of the file being downloaded */
+    val downloading: String? = null,
+    val lastDownloaded: String? = null,
+    val mediaError: String? = null,
 )
 
 /**
@@ -72,7 +85,8 @@ class StockCameraController(
     private val settings: AppSettings,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 ) {
-    private val network = CameraNetwork(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val network = CameraNetwork(appContext)
 
     private val _state = MutableStateFlow(StockCameraState())
     val state: StateFlow<StockCameraState> = _state.asStateFlow()
@@ -80,6 +94,12 @@ class StockCameraController(
     private var pollJob: Job? = null
     private var cooldownJob: Job? = null
     private var activeNetwork: Network? = null
+    private var releaseJob: Job? = null
+
+    @Volatile private var mediaSession: StockClient.MediaSession? = null
+    /** One request to the camera's media server at a time: thumbnails, downloads and the session's end. */
+    private val mediaLane = Mutex()
+    private val thumbnails = ConcurrentHashMap<String, ByteArray>()
 
     var stockClient: StockClient? = null
         private set
@@ -105,6 +125,7 @@ class StockCameraController(
 
     fun setMode(mode: StockMode) {
         if (_state.value.mode == mode) return
+        closeMedia()
         _state.update { it.copy(mode = mode, health = CameraHealthState.Unknown) }
         val currentWifi = _state.value.wifi
         if (currentWifi is WifiLayerState.Connected) {
@@ -156,6 +177,7 @@ class StockCameraController(
                 val now = System.currentTimeMillis()
                 EventLog.log("StockCameraController: Wi-Fi onLost at $now")
                 stopPolling()
+                abandonMedia()
                 stockClient = null
                 oscClient = null
                 activeNetwork = null
@@ -171,6 +193,7 @@ class StockCameraController(
                 val now = System.currentTimeMillis()
                 EventLog.log("StockCameraController: Wi-Fi onUnavailable at $now")
                 stopPolling()
+                abandonMedia()
                 stockClient = null
                 oscClient = null
                 activeNetwork = null
@@ -231,14 +254,24 @@ class StockCameraController(
         }
     }
 
+    /** Leaves the camera's Wi-Fi. An open gallery is ended first, while the camera can still be told. */
     fun disconnect() {
-        disconnectInternal(keepMode = false)
+        val session = takeMedia()
+        if (session == null) {
+            disconnectInternal(keepMode = false)
+            return
+        }
+        scope.launch {
+            mediaLane.withLock { withContext(Dispatchers.IO) { session.close() } }
+            disconnectInternal(keepMode = false)
+        }
     }
 
     private fun disconnectInternal(keepMode: Boolean) {
         stopPolling()
         cooldownJob?.cancel()
         cooldownJob = null
+        abandonMedia()
         activeNetwork = null
         network.release()
         stockClient = null
@@ -250,6 +283,130 @@ class StockCameraController(
                 session = SessionLayerState.Idle
             )
         }
+    }
+
+    // ---- the camera's gallery (Media List mode) ----
+
+    /** Lists the camera's files. Only from idle: the camera holds one session at a time. */
+    fun openMedia() {
+        val client = stockClient ?: return
+        val current = _state.value
+        if (current.session !is SessionLayerState.Idle || current.mediaLoading) return
+        setSessionState(SessionLayerState.MediaLibrary)
+        _state.update { it.copy(mediaLoading = true, mediaError = null, lastDownloaded = null) }
+        scope.launch {
+            try {
+                val session = withContext(Dispatchers.IO) { client.openMediaSession() }
+                if (stockClient !== client) {
+                    // The link went away meanwhile: nothing to show, only the session's port to free
+                    thread(isDaemon = true) { session.close() }
+                    return@launch
+                }
+                mediaSession = session
+                _state.update { it.copy(media = session.items, mediaLoading = false) }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                EventLog.log("Stock gallery failed: ${e.message}")
+                _state.update { it.copy(mediaLoading = false, mediaError = e.message ?: e.javaClass.simpleName) }
+                if (_state.value.session is SessionLayerState.MediaLibrary) setSessionState(SessionLayerState.Idle)
+            }
+        }
+    }
+
+    /**
+     * Ends the gallery, after a transfer in progress. The camera then stops answering for a while
+     * (UNSUBSCRIBE closes its session), hence the countdown.
+     */
+    fun closeMedia() {
+        val session = takeMedia() ?: return
+        scope.launch {
+            mediaLane.withLock { withContext(Dispatchers.IO) { session.close() } }
+            if (_state.value.session is SessionLayerState.MediaLibrary) startCooldown()
+        }
+    }
+
+    /** Saves one of the camera's files to the phone. One at a time. */
+    fun download(item: StockMediaItem) {
+        val client = stockClient ?: return
+        if (mediaSession == null || _state.value.downloading != null) return
+        _state.update { it.copy(downloading = item.title, mediaError = null, lastDownloaded = null) }
+        scope.launch {
+            // Not the file's own name: that text comes from the camera
+            val tmp = File(appContext.cacheDir, "stock_dl_${System.nanoTime()}")
+            try {
+                mediaLane.withLock {
+                    withContext(Dispatchers.IO) {
+                        client.download(item.mediaUrl, tmp)
+                        MediaSaver.publish(
+                            appContext,
+                            item.title,
+                            item.kind,
+                            if (item.kind == FileKind.VIDEO) "video/mp4" else "image/jpeg",
+                            System.currentTimeMillis() / 1000L,
+                            tmp,
+                        )
+                    }
+                }
+                EventLog.log("Stock gallery: saved ${item.title}")
+                _state.update { it.copy(lastDownloaded = item.title) }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                EventLog.log("Stock gallery: ${item.title} failed: ${e.message}")
+                _state.update { it.copy(mediaError = e.message ?: e.javaClass.simpleName) }
+            } finally {
+                tmp.delete()
+                _state.update { it.copy(downloading = null) }
+            }
+        }
+    }
+
+    /** A file's small picture, fetched once and one at a time; null when there is none. */
+    suspend fun thumbnail(item: StockMediaItem): ByteArray? {
+        val url = item.thumbUrl ?: return null
+        thumbnails[url]?.let { return it }
+        return mediaLane.withLock {
+            val client = stockClient
+            if (mediaSession == null || client == null) return@withLock null
+            thumbnails[url] ?: withContext(Dispatchers.IO) { client.fetchThumbnail(url) }?.also { thumbnails[url] = it }
+        }
+    }
+
+    /** The open session, taken out of the state: the caller ends it. */
+    private fun takeMedia(): StockClient.MediaSession? {
+        val session = mediaSession
+        mediaSession = null
+        thumbnails.clear()
+        _state.update { it.copy(media = null, mediaLoading = false, mediaError = null, lastDownloaded = null) }
+        return session
+    }
+
+    /** The link is gone or going: frees the session's port without waiting for the camera. */
+    private fun abandonMedia() {
+        takeMedia()?.let { session -> thread(isDaemon = true) { session.close() } }
+        if (_state.value.session is SessionLayerState.MediaLibrary) {
+            _state.update { it.copy(session = SessionLayerState.Idle) }
+        }
+    }
+
+    // ---- app in the background ----
+
+    /** Lets the camera's Wi-Fi go shortly after the app leaves the screen, unless something is in use. */
+    fun onBackground() {
+        releaseJob?.cancel()
+        releaseJob = scope.launch {
+            delay(BACKGROUND_RELEASE_MS)
+            val current = _state.value
+            val unused = current.session is SessionLayerState.Idle || current.session is SessionLayerState.CoolingDown
+            if (current.wifi !is WifiLayerState.Disconnected && unused && current.downloading == null) {
+                EventLog.log("In the background: releasing the stock camera link")
+                disconnect()
+            }
+        }
+    }
+
+    fun onForeground() {
+        releaseJob?.cancel()
+        releaseJob = null
     }
 
     fun setSessionState(session: SessionLayerState) {
@@ -327,5 +484,9 @@ class StockCameraController(
 
     fun release() {
         disconnect()
+    }
+
+    private companion object {
+        const val BACKGROUND_RELEASE_MS = 30_000L
     }
 }

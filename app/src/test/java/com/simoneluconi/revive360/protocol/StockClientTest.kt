@@ -1,6 +1,7 @@
 package com.simoneluconi.revive360.protocol
 
 import com.sun.net.httpserver.HttpServer
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
@@ -46,6 +47,9 @@ class StockClientTest {
                 soap == "X_GetSettingInformation" -> resource("settings.xml")
                 soap == "X_GetStorage" -> resource("storage.xml")
                 soap == "GetInfomation" -> "<QualityHighUrl>http://x:7679/livestream_high.avi</QualityHighUrl>"
+                soap == "Browse" -> "<Result>&lt;DIDL-Lite&gt;&lt;item id=\"1\"&gt;&lt;dc:title&gt;SAM_0001.jpg&lt;/dc:title&gt;" +
+                    "&lt;res size=\"5\"&gt;http://127.0.0.1:7679/smp01.jpg&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;</Result>"
+                exchange.requestURI.path == "/smp01.jpg" -> "PHOTO"
                 exchange.requestURI.path == "/livestream_high.avi" -> null
                 else -> ""
             }?.toByteArray() ?: live
@@ -140,6 +144,31 @@ class StockClientTest {
         stream.close()
         waitFor("UNSUBSCRIBE /smp_5_ uuid:fake")
         assertEquals("UNSUBSCRIBE /smp_5_ uuid:fake", requests.last())
+    }
+
+    @Test
+    fun theGalleryFollowsTheTestedOrderAndItsCloseEndsTheSessionBeforeReturning() {
+        val camera = client()
+        val session = camera.openMediaSession()
+        assertEquals(
+            listOf("GET /smp_2_", "SUBSCRIBE /smp_5_", "POST /smp_4_ SetOperationState", "POST /smp_4_ Browse"),
+            requests.toList(),
+        )
+        assertTrue(bodies[2].contains("<StateEvent>changeToML</StateEvent>"))
+        val item = session.items.single()
+        val saved = File.createTempFile("stock", ".jpg")
+        try {
+            camera.download(item.mediaUrl, saved)
+            assertEquals("PHOTO", saved.readText())
+            // An address that is not the camera's is refused before any connection
+            assertThrows(IOException::class.java) { camera.download("http://example.com:7679/smp01.jpg", saved) }
+        } finally {
+            saved.delete()
+        }
+        session.close()
+        assertEquals("UNSUBSCRIBE /smp_5_ uuid:fake", requests.last())
+        session.close()
+        assertEquals(1, requests.count { it.startsWith("UNSUBSCRIBE") })
     }
 
     @Test
