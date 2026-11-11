@@ -88,11 +88,19 @@ fun StockCameraScreen() {
     var shotMessage by remember { mutableStateOf<String?>(null) }
     var shotError by remember { mutableStateOf<String?>(null) }
 
+    var mediaSession by remember { mutableStateOf<StockClient.MediaSession?>(null) }
     var mediaList by remember { mutableStateOf<List<StockMediaItem>?>(null) }
     var loadingMedia by remember { mutableStateOf(false) }
     var downloadingName by remember { mutableStateOf<String?>(null) }
     var downloadMessage by remember { mutableStateOf<String?>(null) }
     var downloadError by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            mediaSession?.close()
+            mediaSession = null
+        }
+    }
 
     val activeMode = state.mode
     val isOsc = activeMode == StockMode.OSC
@@ -281,14 +289,17 @@ fun StockCameraScreen() {
                             loadingMedia = true
                             downloadMessage = null
                             downloadError = null
+                            controller.setSessionState(SessionLayerState.MediaLibrary)
                             scope.launch {
                                 try {
-                                    val items = withContext(Dispatchers.IO) { camera.listMedia() }
-                                    mediaList = items
+                                    val session = withContext(Dispatchers.IO) { camera.openMediaSession() }
+                                    mediaSession = session
+                                    mediaList = session.items
                                 } catch (e: Exception) {
                                     if (e is CancellationException) throw e
                                     EventLog.log("Stock list media error: ${e.message}")
                                     downloadError = e.message ?: e.javaClass.simpleName
+                                    controller.setSessionState(SessionLayerState.Idle)
                                 } finally {
                                     loadingMedia = false
                                 }

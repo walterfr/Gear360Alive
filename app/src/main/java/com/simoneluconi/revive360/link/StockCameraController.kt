@@ -51,6 +51,7 @@ sealed interface SessionLayerState {
     data object Idle : SessionLayerState
     data object LivePreview : SessionLayerState
     data object CapturingPhoto : SessionLayerState
+    data object MediaLibrary : SessionLayerState
     data class CoolingDown(val secondsRemaining: Int) : SessionLayerState
 }
 
@@ -253,7 +254,7 @@ class StockCameraController(
 
     fun setSessionState(session: SessionLayerState) {
         _state.update { it.copy(session = session) }
-        if (session is SessionLayerState.LivePreview || session is SessionLayerState.CapturingPhoto) {
+        if (session is SessionLayerState.LivePreview || session is SessionLayerState.CapturingPhoto || session is SessionLayerState.MediaLibrary) {
             stopPolling()
         } else if (session is SessionLayerState.Idle && _state.value.wifi is WifiLayerState.Connected) {
             startPolling()

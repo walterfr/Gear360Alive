@@ -67,10 +67,23 @@ class StockClient(
     }
 
     /**
-     * Lists media stored on the camera's SD card by switching to Media List mode (changeToML)
-     * and querying ContentDirectory:Browse on container 8 (AllMedia).
+     * Active media session handle. Keeps ML mode alive while the user browses and downloads files.
      */
-    fun listMedia(): List<StockMediaItem> {
+    class MediaSession internal constructor(
+        val items: List<StockMediaItem>,
+        private val onClose: () -> Unit
+    ) : AutoCloseable {
+        override fun close() {
+            onClose()
+        }
+    }
+
+    /**
+     * Opens a media session by switching to Media List mode (changeToML) and querying
+     * ContentDirectory:Browse on container 8 (AllMedia). The session must be kept open
+     * while downloading files, and closed when done.
+     */
+    fun openMediaSession(): MediaSession {
         wake()
         val listener = ServerSocket(callbackPort)
         thread(name = "stock-events", isDaemon = true) { answerEvents(listener) }
@@ -84,9 +97,16 @@ class StockClient(
             val browseArgs = "<ObjectID>8</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>" +
                 "<Filter>*</Filter><StartingIndex>0</StartingIndex><RequestedCount>100</RequestedCount><SortCriteria></SortCriteria>"
             val answer = post("Browse", browseArgs)
-            return parseBrowseItems(answer)
-        } finally {
+            val items = parseBrowseItems(answer)
+            val sessionSid = sid
+            return MediaSession(items) {
+                thread(name = "stock-ml-end", isDaemon = true) {
+                    end(sessionSid, listener)
+                }
+            }
+        } catch (e: Exception) {
             end(sid, listener)
+            throw e
         }
     }
 
