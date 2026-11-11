@@ -24,6 +24,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Socket
 
 enum class StockMode {
     IOS,
@@ -76,13 +78,12 @@ class StockCameraController(
 
     private var pollJob: Job? = null
     private var cooldownJob: Job? = null
+    private var activeNetwork: Network? = null
 
     var stockClient: StockClient? = null
         private set
     var oscClient: OscClient? = null
         private set
-
-    private var activeNetwork: Network? = null
 
     private fun setupClients(network: Network?, host: String, mode: StockMode) {
         if (network != null) activeNetwork = network
@@ -103,8 +104,12 @@ class StockCameraController(
 
     fun setMode(mode: StockMode) {
         if (_state.value.mode == mode) return
-        disconnect()
         _state.update { it.copy(mode = mode, health = CameraHealthState.Unknown) }
+        val currentWifi = _state.value.wifi
+        if (currentWifi is WifiLayerState.Connected) {
+            setupClients(null, currentWifi.host, mode)
+            startPolling()
+        }
     }
 
     fun connect() {
@@ -126,7 +131,7 @@ class StockCameraController(
 
         network.requestStock(activeCode, object : CameraNetwork.Listener {
             override fun onAvailable(network: Network, host: String) {
-                setupClients(network, host, _state.value.mode)
+                activeNetwork = network
                 _state.update {
                     it.copy(
                         wifi = WifiLayerState.Connected(host = host),
@@ -134,20 +139,15 @@ class StockCameraController(
                         lastDropReason = null
                     )
                 }
-                startPolling()
+                // Detect which service is actually answering on the camera
+                detectAndApplyCameraMode(network, host)
             }
 
             override fun onSsid(ssid: String) {
-                // Auto-detect mode from actual connected SSID
                 val detectedMode = if (ssid.endsWith(".OSC", ignoreCase = true)) StockMode.OSC else StockMode.IOS
                 if (_state.value.mode != detectedMode) {
-                    EventLog.log("StockCameraController: Auto-detected mode $detectedMode from SSID $ssid")
-                    _state.update { it.copy(mode = detectedMode) }
-                    val currentWifi = _state.value.wifi
-                    if (currentWifi is WifiLayerState.Connected) {
-                        // Re-setup clients on the same active network for the new mode
-                        setupClients(null, currentWifi.host, detectedMode)
-                    }
+                    EventLog.log("StockCameraController: detected $detectedMode from SSID $ssid")
+                    setMode(detectedMode)
                 }
             }
 
@@ -157,6 +157,7 @@ class StockCameraController(
                 stopPolling()
                 stockClient = null
                 oscClient = null
+                activeNetwork = null
                 _state.update {
                     it.copy(
                         wifi = WifiLayerState.Lost(now),
@@ -171,6 +172,7 @@ class StockCameraController(
                 stopPolling()
                 stockClient = null
                 oscClient = null
+                activeNetwork = null
                 _state.update {
                     it.copy(
                         wifi = WifiLayerState.Unavailable(now),
@@ -190,6 +192,42 @@ class StockCameraController(
                 }
             }
         })
+    }
+
+    /**
+     * Inspects camera ports directly (port 80 for OSC vs port 7676 for iOS UPnP/SOAP)
+     * so that the app instantly knows whether the camera is in Street View or Connect to iOS mode,
+     * even if Android didn't reveal the SSID name.
+     */
+    private fun detectAndApplyCameraMode(network: Network, host: String) {
+        scope.launch(Dispatchers.IO) {
+            val isOscOpen = testPort(network, host, 80, timeoutMs = 700)
+            val isSoapOpen = testPort(network, host, 7676, timeoutMs = 700)
+            val detected = when {
+                isOscOpen && !isSoapOpen -> StockMode.OSC
+                isSoapOpen && !isOscOpen -> StockMode.IOS
+                else -> _state.value.mode
+            }
+            EventLog.log("StockCameraController: Port probe (80=$isOscOpen, 7676=$isSoapOpen) -> mode=$detected")
+            withContext(Dispatchers.Main) {
+                if (_state.value.mode != detected) {
+                    _state.update { it.copy(mode = detected) }
+                }
+                setupClients(network, host, detected)
+                startPolling()
+            }
+        }
+    }
+
+    private fun testPort(network: Network, host: String, port: Int, timeoutMs: Int): Boolean {
+        return try {
+            val socket = network.socketFactory.createSocket()
+            socket.connect(InetSocketAddress(host, port), timeoutMs)
+            socket.close()
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun disconnect() {
@@ -222,10 +260,6 @@ class StockCameraController(
         }
     }
 
-    /**
-     * Start the expected 30..107 second cooldown cycle after live preview or unsubscribe,
-     * showing countdown in UI instead of error state.
-     */
     fun startCooldown(seconds: Int = 60, onFinished: () -> Unit = {}) {
         cooldownJob?.cancel()
         setSessionState(SessionLayerState.CoolingDown(seconds))
