@@ -556,6 +556,15 @@ Validada escuta de eventos UPnP (`SUBSCRIBE` em `/smp_5_`) na porta 8059 enquant
 - O download direto via GET de arquivo estático sem mapeamento prévio é recusado com `ConnectionResetError`.
 - Engenharia reversa no APK oficial da Samsung revelou que a listagem de mídia e o download de arquivos exigem `SetOperationState` com `changeToML` (Media List), que prepara o streaming DLNA e o `Browse`.
 
+### Medição 3 da Fase 2: Desligamento automático e keepalive, 2026-11-11
+
+Medido o comportamento do desligamento automático (`AutoPowerOffValue = 5min`) sob polling periódico:
+- **Resultado:** A câmera respondeu a 14 consultas consecutivas de `X_GetSettingInformation` (a cada 20 s) com RTT de 70-100 ms. Aos **282 segundos (4 min 42 s)**, a câmera desligou o Wi-Fi e parou de responder (`TimeoutError`), mesmo com bateria em 75%.
+- **Conclusão:** Consultas SOAP de leitura **não resetam** o temporizador de inatividade da câmera. O timer interno de 5 min só é reiniciado por ação física nos botões ou gravação ativa.
+- **Opções de contorno:**
+  1. A câmera declara suporte a `AutoPowerOffValue` de `1min`, `3min`, `5min` e `15min`. Ajustar para `15min` (pelo menu físico ou comando seguro) triplica a autonomia antes do repouso.
+  2. O app detecta a desconexão perto de 5 min e orienta o usuário: *"Câmera entrou em repouso por inatividade (5 min). Pressione o botão para religar."*
+
 ### Pendências
 
 - Rodar nos modos "Connect to Android" e "Connect to Street View" (baixa prioridade: o caminho principal já responde).
