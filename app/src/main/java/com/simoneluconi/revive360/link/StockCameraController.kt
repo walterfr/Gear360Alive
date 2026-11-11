@@ -82,6 +82,25 @@ class StockCameraController(
     var oscClient: OscClient? = null
         private set
 
+    private var activeNetwork: Network? = null
+
+    private fun setupClients(network: Network?, host: String, mode: StockMode) {
+        if (network != null) activeNetwork = network
+        val net = activeNetwork ?: return
+        val connector = Connector { url -> net.openConnection(url) as HttpURLConnection }
+        if (mode == StockMode.OSC) {
+            oscClient = OscClient(host, connector = connector)
+            stockClient = null
+        } else {
+            stockClient = StockClient(
+                host,
+                connector,
+                openSocket = { net.socketFactory.createSocket() }
+            )
+            oscClient = null
+        }
+    }
+
     fun setMode(mode: StockMode) {
         if (_state.value.mode == mode) return
         disconnect()
@@ -107,18 +126,7 @@ class StockCameraController(
 
         network.requestStock(activeCode, object : CameraNetwork.Listener {
             override fun onAvailable(network: Network, host: String) {
-                val connector = Connector { url -> network.openConnection(url) as HttpURLConnection }
-                if (_state.value.mode == StockMode.OSC) {
-                    oscClient = OscClient(host, connector = connector)
-                    stockClient = null
-                } else {
-                    stockClient = StockClient(
-                        host,
-                        connector,
-                        openSocket = { network.socketFactory.createSocket() }
-                    )
-                    oscClient = null
-                }
+                setupClients(network, host, _state.value.mode)
                 _state.update {
                     it.copy(
                         wifi = WifiLayerState.Connected(host = host),
@@ -127,6 +135,20 @@ class StockCameraController(
                     )
                 }
                 startPolling()
+            }
+
+            override fun onSsid(ssid: String) {
+                // Auto-detect mode from actual connected SSID
+                val detectedMode = if (ssid.endsWith(".OSC", ignoreCase = true)) StockMode.OSC else StockMode.IOS
+                if (_state.value.mode != detectedMode) {
+                    EventLog.log("StockCameraController: Auto-detected mode $detectedMode from SSID $ssid")
+                    _state.update { it.copy(mode = detectedMode) }
+                    val currentWifi = _state.value.wifi
+                    if (currentWifi is WifiLayerState.Connected) {
+                        // Re-setup clients on the same active network for the new mode
+                        setupClients(null, currentWifi.host, detectedMode)
+                    }
+                }
             }
 
             override fun onLost() {
@@ -178,6 +200,7 @@ class StockCameraController(
         stopPolling()
         cooldownJob?.cancel()
         cooldownJob = null
+        activeNetwork = null
         network.release()
         stockClient = null
         oscClient = null

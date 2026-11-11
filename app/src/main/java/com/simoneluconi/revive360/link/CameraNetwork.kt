@@ -37,6 +37,8 @@ class CameraNetwork(context: Context) {
         fun onUnavailable()
         /** The link to the camera's Wi-Fi: its frequency and the current link speed (for display). */
         fun onLink(frequencyMhz: Int, linkMbps: Int) {}
+        /** The SSID of the network that just connected, if known */
+        fun onSsid(ssid: String) {}
     }
 
     fun request(camera: PairedCamera, listener: Listener) {
@@ -85,6 +87,8 @@ class CameraNetwork(context: Context) {
             override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
                 val wifi = capabilities.transportInfo as? WifiInfo ?: return
                 listener.onLink(wifi.frequency, wifi.linkSpeed)
+                val cleanSsid = wifi.ssid?.trim('\"', ' ')?.takeIf { it.isNotEmpty() && it != "<unknown ssid>" }
+                if (cleanSsid != null) listener.onSsid(cleanSsid)
             }
 
             override fun onLost(network: Network) {
