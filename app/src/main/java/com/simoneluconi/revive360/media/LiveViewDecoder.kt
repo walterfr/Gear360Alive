@@ -15,6 +15,11 @@ import java.io.DataInputStream
 import java.io.EOFException
 import java.io.InputStream
 import java.nio.ByteBuffer
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 
 /**
  * Plays the camera's live view (protocol §5.14) onto a [Surface]. The C200/R210 send Samsung's TTTS
@@ -22,7 +27,10 @@ import java.nio.ByteBuffer
  * `id(4) size(4, big-endian) timestamp(8) data(size)`; video chunks (`00VD`) hold one HEVC access
  * unit in Annex B form, the first with its VPS/SPS/PPS, or, on the SM-R210's livestream_high.avi, one
  * JPEG (1280x640 at about 15 fps, timestamps 8008 apart); gyro chunks (`00VR`) hold 3 rational pairs
- * `(pitch, roll, yaw)` in degrees. Each frame is shown as soon as it decodes: a preview, not a recording.
+ * `(pitch, roll, yaw)` in degrees.
+ *
+ * For JPEG streams, network reading and surface rendering run in separate threads using a 1-frame
+ * queue: newer frames immediately replace older unrendered frames, preventing socket latency build-up.
  *
  * [run] blocks reading the stream; closing the stream ends it.
  */
@@ -47,14 +55,38 @@ class LiveViewDecoder(
     private var dropped = 0
     private var decodeMs = 0L
     private var frames = 0L
-    // Falling behind: the camera's timeline against the phone's clock
+
+    // Falling behind: the camera's timeline against the phone's clock (for HEVC)
     private var anchorWall = 0L
     private var anchorTs = 0L
     private var catchingUp = false
 
+    private data class JpegPayload(val data: ByteArray, val timestamp: Long)
+
     /** Plays until the stream ends or fails (the exception says why) */
     fun run() {
         val data = DataInputStream(input.buffered(256 * 1024))
+        val latestJpeg = AtomicReference<JpegPayload?>(null)
+        val hasNewJpeg = ArrayBlockingQueue<Unit>(1)
+        val running = AtomicBoolean(true)
+
+        // Separate render thread for JPEG to decouple network read from decode/canvas drawing
+        val renderThread = thread(name = "live-jpeg-render") {
+            while (running.get()) {
+                val signal = try {
+                    hasNewJpeg.poll(100, TimeUnit.MILLISECONDS)
+                } catch (e: InterruptedException) {
+                    null
+                }
+                if (signal != null || latestJpeg.get() != null) {
+                    val current = latestJpeg.getAndSet(null)
+                    if (current != null) {
+                        jpeg(current.data)
+                    }
+                }
+            }
+        }
+
         try {
             val (width, height) = readHeader(data)
             onSize(width, height)
@@ -67,10 +99,10 @@ class LiveViewDecoder(
                 when (String(id, Charsets.US_ASCII)) {
                     VIDEO_CHUNK -> when {
                         isJpeg(payload) -> {
-                            // Another whole frame already waiting: this one would only add delay
-                            val stale = data.available() > size
-                            if (!stale) jpeg(payload)
-                            jpegStats(timestamp, stale)
+                            val previous = latestJpeg.getAndSet(JpegPayload(payload, timestamp))
+                            val skipped = previous != null
+                            hasNewJpeg.offer(Unit)
+                            jpegStats(timestamp, skipped)
                         }
                         else -> {
                             onAccessUnit(payload)
@@ -81,6 +113,9 @@ class LiveViewDecoder(
                 }
             }
         } finally {
+            running.set(false)
+            renderThread.interrupt()
+            runCatching { renderThread.join(1000L) }
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
             codec = null
@@ -101,7 +136,6 @@ class LiveViewDecoder(
         }
         val lag = (now - anchorWall) - (timestamp - anchorTs) * 1_000 / TIMESCALE
         if (lag < 0 || (key && (catchingUp || lag > MAX_LAG_MS))) {
-            // Ahead of the clock (data came early), or a key frame to restart from
             anchorWall = now
             anchorTs = timestamp
             catchingUp = false
@@ -133,8 +167,7 @@ class LiveViewDecoder(
 
     /**
      * Every 5 s in the event log: frames received, skipped and their decode time, and how far the
-     * arrivals drift from the camera's clock since the first frame. A growing drift means the phone
-     * falls behind; a steady one, that the delay comes before the phone (camera or Wi-Fi).
+     * arrivals drift from the camera's clock since the first frame.
      */
     private fun jpegStats(timestamp: Long, skipped: Boolean) {
         val now = SystemClock.elapsedRealtime()
@@ -169,6 +202,7 @@ class LiveViewDecoder(
             ?: BitmapFactory.decodeByteArray(data, 0, data.size)
             ?: return
         bitmap = frame
+        if (!surface.isValid) return
         val canvas = surface.lockHardwareCanvas()
         try {
             canvas.drawBitmap(frame, null, Rect(0, 0, canvas.width, canvas.height), null)
@@ -188,7 +222,6 @@ class LiveViewDecoder(
             buffer.put(au, 0, minOf(au.size, buffer.remaining()))
             codec.queueInputBuffer(inIndex, 0, buffer.position(), timestamp * 1_000_000 / TIMESCALE, 0)
         }
-        // Whatever is decoded goes to the screen now
         val info = MediaCodec.BufferInfo()
         while (true) {
             val outIndex = codec.dequeueOutputBuffer(info, 0)
@@ -204,7 +237,7 @@ class LiveViewDecoder(
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_HEVC, width, height).apply {
             setByteBuffer("csd-0", ByteBuffer.wrap(config))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-            setInteger(MediaFormat.KEY_PRIORITY, 0)   // real time
+            setInteger(MediaFormat.KEY_PRIORITY, 0)
         }
         return MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC).also {
             it.configure(format, surface, null, 0)
@@ -256,7 +289,6 @@ class LiveViewDecoder(
             for ((k, start) in starts.withIndex()) {
                 val type = (au[start].toInt() shr 1) and 0x3f
                 if (type != NAL_VPS && type != NAL_SPS && type != NAL_PPS) continue
-                // Up to the next start code (its zero bytes excluded)
                 var end = if (k + 1 < starts.size) starts[k + 1] - 3 else au.size
                 while (end > start && au[end - 1].toInt() == 0) end--
                 out.write(byteArrayOf(0, 0, 0, 1))
