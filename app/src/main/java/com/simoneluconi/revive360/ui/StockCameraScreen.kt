@@ -2,12 +2,17 @@ package com.simoneluconi.revive360.ui
 
 import android.net.wifi.WifiManager
 import android.view.Surface
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -21,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -45,6 +51,7 @@ import com.simoneluconi.revive360.protocol.LiveStream
 import com.simoneluconi.revive360.protocol.OscStatus
 import com.simoneluconi.revive360.protocol.Protocol
 import com.simoneluconi.revive360.protocol.StockClient
+import com.simoneluconi.revive360.protocol.StockMediaItem
 import com.simoneluconi.revive360.protocol.StockStatus
 import com.simoneluconi.revive360.stitch.CameraMetadata
 import com.simoneluconi.revive360.stitch.DualFisheye
@@ -61,9 +68,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * A camera on its original firmware: joins the network the camera's menu started ("Connect to iOS"
- * for status and live preview, or "Connect to Street View" for remote 360° photo capture via OSC v1).
- *
- * Uses the persistent [StockCameraController] from [Revive360App] to preserve connection outside UI.
+ * for status, live preview and wireless media download, or "Connect to Street View" for remote 360° photo capture via OSC v1).
  */
 @Composable
 fun StockCameraScreen() {
@@ -83,6 +88,12 @@ fun StockCameraScreen() {
     var shotMessage by remember { mutableStateOf<String?>(null) }
     var shotError by remember { mutableStateOf<String?>(null) }
 
+    var mediaList by remember { mutableStateOf<List<StockMediaItem>?>(null) }
+    var loadingMedia by remember { mutableStateOf(false) }
+    var downloadingName by remember { mutableStateOf<String?>(null) }
+    var downloadMessage by remember { mutableStateOf<String?>(null) }
+    var downloadError by remember { mutableStateOf<String?>(null) }
+
     val activeMode = state.mode
     val isOsc = activeMode == StockMode.OSC
     val wifi = state.wifi
@@ -99,6 +110,7 @@ fun StockCameraScreen() {
                         controller.setMode(StockMode.IOS)
                         shotMessage = null
                         shotError = null
+                        mediaList = null
                     }
                 }
                 Chip(stringResource(R.string.stock_mode_osc), selected = isOsc) {
@@ -106,6 +118,7 @@ fun StockCameraScreen() {
                         controller.setMode(StockMode.OSC)
                         shotMessage = null
                         shotError = null
+                        mediaList = null
                     }
                 }
             }
@@ -147,6 +160,7 @@ fun StockCameraScreen() {
                 ) {
                     shotMessage = null
                     shotError = null
+                    mediaList = null
                     controller.connect()
                 }
 
@@ -252,6 +266,111 @@ fun StockCameraScreen() {
             }
 
             val camera = controller.stockClient
+            if (camera != null) {
+                // Card for Wireless Media Gallery / Download
+                Card {
+                    val currentItems = mediaList
+                    if (currentItems == null) {
+                        PillButton(
+                            stringResource(if (loadingMedia) R.string.stock_gallery_loading else R.string.stock_gallery_btn),
+                            Modifier.fillMaxWidth(),
+                            icon = AppIcons.Gallery,
+                            style = ButtonStyle.SECONDARY,
+                            enabled = !loadingMedia && !isLive,
+                        ) {
+                            loadingMedia = true
+                            downloadMessage = null
+                            downloadError = null
+                            scope.launch {
+                                try {
+                                    val items = withContext(Dispatchers.IO) { camera.listMedia() }
+                                    mediaList = items
+                                } catch (e: Exception) {
+                                    if (e is CancellationException) throw e
+                                    EventLog.log("Stock list media error: ${e.message}")
+                                    downloadError = e.message ?: e.javaClass.simpleName
+                                } finally {
+                                    loadingMedia = false
+                                }
+                            }
+                        }
+                    } else {
+                        Label(
+                            stringResource(R.string.stock_gallery_title, currentItems.size),
+                            size = 14.sp,
+                            weight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            currentItems.take(15).forEach { item ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable(enabled = downloadingName == null) {
+                                            downloadingName = item.title
+                                            downloadMessage = null
+                                            downloadError = null
+                                            scope.launch {
+                                                val tmp = File(context.cacheDir, "stock_dl_${item.title}")
+                                                try {
+                                                    withContext(Dispatchers.IO) {
+                                                        camera.download(item.mediaUrl, tmp)
+                                                        MediaSaver.publish(
+                                                            context,
+                                                            item.title,
+                                                            item.kind,
+                                                            if (item.kind == FileKind.VIDEO) "video/mp4" else "image/jpeg",
+                                                            System.currentTimeMillis() / 1000L,
+                                                            tmp
+                                                        )
+                                                    }
+                                                    downloadMessage = context.getString(
+                                                        R.string.stock_gallery_downloaded,
+                                                        item.title,
+                                                        MediaSaver.FOLDER
+                                                    )
+                                                } catch (e: Exception) {
+                                                    if (e is CancellationException) throw e
+                                                    downloadError = e.message ?: e.javaClass.simpleName
+                                                } finally {
+                                                    tmp.delete()
+                                                    downloadingName = null
+                                                }
+                                            }
+                                        }
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val isCurDownloading = downloadingName == item.title
+                                    Label(
+                                        if (isCurDownloading) stringResource(R.string.stock_gallery_downloading, item.title) else item.title,
+                                        modifier = Modifier.weight(1f),
+                                        size = 14.sp,
+                                        color = if (isCurDownloading) colors.accent else colors.text
+                                    )
+                                    Label(
+                                        if (item.sizeBytes > 0) "${item.sizeBytes / (1024 * 1024)} MB" else "",
+                                        size = 12.sp,
+                                        color = colors.text2
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    val msg = downloadMessage
+                    val err = downloadError
+                    if (msg != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Label(msg, size = 13.sp, color = colors.good)
+                    }
+                    if (err != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Label(err, size = 13.sp, color = colors.bad)
+                    }
+                }
+            }
+
             if (Features.EXPERIMENTAL && camera != null) {
                 if (isLive) {
                     StockPreview(camera) {
@@ -283,8 +402,6 @@ fun StockCameraScreen() {
                         )
                     }
                 }
-            } else {
-                Card { Label(stringResource(R.string.stock_read_only), size = 14.sp, color = colors.text2) }
             }
         }
     }

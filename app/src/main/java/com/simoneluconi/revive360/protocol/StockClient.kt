@@ -1,5 +1,7 @@
 package com.simoneluconi.revive360.protocol
 
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -9,6 +11,19 @@ import java.net.Socket
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
+
+/**
+ * A media item stored on the camera SD card, discovered via UPnP ContentDirectory:Browse in ML mode.
+ */
+data class StockMediaItem(
+    val id: String,
+    val title: String,
+    val mediaUrl: String,
+    val thumbUrl: String?,
+    val screenUrl: String?,
+    val sizeBytes: Long = 0L,
+    val kind: FileKind = if (title.endsWith(".mp4", ignoreCase = true)) FileKind.VIDEO else FileKind.PHOTO
+)
 
 /**
  * The only SOAP actions this client can send to a camera on its original firmware: each one was read
@@ -49,6 +64,67 @@ class StockClient(
     fun status(): StockStatus {
         wake()
         return parseStatus(query(StockQuery.X_GetSettingInformation), query(StockQuery.X_GetStorage))
+    }
+
+    /**
+     * Lists media stored on the camera's SD card by switching to Media List mode (changeToML)
+     * and querying ContentDirectory:Browse on container 8 (AllMedia).
+     */
+    fun listMedia(): List<StockMediaItem> {
+        wake()
+        val listener = ServerSocket(callbackPort)
+        thread(name = "stock-events", isDaemon = true) { answerEvents(listener) }
+        var sid: String? = null
+        try {
+            sid = subscribe(listener.localPort)
+            Thread.sleep(settleMs)
+            post("SetOperationState", "<StateEvent>changeToML</StateEvent>")
+            Thread.sleep(settleMs)
+
+            val browseArgs = "<ObjectID>8</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>" +
+                "<Filter>*</Filter><StartingIndex>0</StartingIndex><RequestedCount>100</RequestedCount><SortCriteria></SortCriteria>"
+            val answer = post("Browse", browseArgs)
+            return parseBrowseItems(answer)
+        } finally {
+            end(sid, listener)
+        }
+    }
+
+    /**
+     * Downloads a file from the camera's streaming server (port 7679) to [dest].
+     */
+    fun download(mediaUrl: String, dest: File, onProgress: (bytesDownloaded: Long, totalBytes: Long) -> Unit = { _, _ -> }) {
+        val connection = connector.open(URL(mediaUrl)).apply {
+            connectTimeout = TIMEOUT_MS
+            readTimeout = 30_000
+            setRequestProperty("User-Agent", STOCK_USER_AGENT)
+            setRequestProperty("Access-Method", "manual")
+            setRequestProperty("Connection", "close")
+        }
+        val code = connection.responseCode
+        if (code != 200 && code != 206) {
+            connection.disconnect()
+            throw IOException("Download failed: HTTP $code")
+        }
+        val total = connection.contentLengthLong
+        var downloaded = 0L
+        dest.parentFile?.mkdirs()
+        try {
+            connection.inputStream.use { input ->
+                FileOutputStream(dest).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        output.write(buffer, 0, n)
+                        downloaded += n
+                        onProgress(downloaded, total)
+                    }
+                }
+            }
+        } finally {
+            connection.disconnect()
+        }
     }
 
     /** The first request after a pause has answered 503 on the SM-R210, and the description then answers. */
@@ -260,6 +336,30 @@ class StockClient(
                 totalMb = tag(storage, "TotalSpaceValue")?.toLongOrNull(),
                 freeMb = tag(storage, "AvaiableSpaceValue")?.toLongOrNull(),
             )
+        }
+
+        fun parseBrowseItems(body: String): List<StockMediaItem> {
+            val resultMatch = Regex("<Result>(.*?)</Result>", RegexOption.DOT_MATCHES_ALL).find(body)
+            val didl = resultMatch?.groupValues?.get(1)?.replace("&lt;", "<")?.replace("&gt;", ">")?.replace("&amp;", "&") ?: ""
+            val items = mutableListOf<StockMediaItem>()
+            val itemRegex = Regex("<item\\b(.*?)</item>", RegexOption.DOT_MATCHES_ALL)
+            for (match in itemRegex.findAll(didl)) {
+                val itemXml = match.value
+                val id = Regex("id=\"([^\"]+)\"").find(itemXml)?.groupValues?.get(1) ?: continue
+                val title = Regex("<dc:title[^>]*>([^<]+)</dc:title>").find(itemXml)?.groupValues?.get(1) ?: id
+                val resMatches = Regex("<res\\b([^>]*)>([^<]+)</res>").findAll(itemXml).toList()
+                val urls = resMatches.map { it.groupValues[2].trim() }
+                if (urls.isEmpty()) continue
+
+                val mainUrl = urls.firstOrNull { !it.contains("thumb") && !it.contains("screen") } ?: urls[0]
+                val thumbUrl = urls.firstOrNull { it.contains("thumb") }
+                val screenUrl = urls.firstOrNull { it.contains("screen") }
+
+                val size = Regex("size=\"([^\"]+)\"").find(resMatches[0].groupValues[1])?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+
+                items.add(StockMediaItem(id = id, title = title, mediaUrl = mainUrl, thumbUrl = thumbUrl, screenUrl = screenUrl, sizeBytes = size))
+            }
+            return items
         }
     }
 }

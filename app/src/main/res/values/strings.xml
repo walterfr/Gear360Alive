@@ -333,6 +333,11 @@
     <string name="stock_read_only">This screen only reads. It changes nothing on the camera.</string>
     <string name="stock_mode_ios">Connect to iOS</string>
     <string name="stock_mode_osc">Street View (OSC)</string>
+    <string name="stock_gallery_btn">View camera photos &amp; videos</string>
+    <string name="stock_gallery_title">Camera SD Card (%1$d items)</string>
+    <string name="stock_gallery_loading">Listing camera files via Wi-Fi…</string>
+    <string name="stock_gallery_downloading">Downloading %1$s…</string>
+    <string name="stock_gallery_downloaded">Saved %1$s to %2$s</string>
     <string name="stock_osc_steps">On the camera, hold Menu until a Connect to option appears, press Menu until it shows Connect to Street View, and confirm with the shutter button. Then type the 8-digit code shown on its screen.</string>
     <string name="stock_osc_shoot">Take 360° photo</string>
     <string name="stock_osc_shooting">Taking &amp; stitching on the camera (~16 s)…</string>

@@ -329,6 +329,11 @@
     <string name="stock_preview_wait">Dopo un\'anteprima la fotocamera non risponde per 1-2 minuti, poi torna da sola.</string>
     <string name="stock_cooldown_countdown">Riavvio rete fotocamera: %1$d s rimanenti…</string>
     <string name="stock_read_only">Questa schermata legge soltanto. Non cambia nulla sulla fotocamera.</string>
+    <string name="stock_gallery_btn">Vedi foto e video della fotocamera</string>
+    <string name="stock_gallery_title">Scheda SD fotocamera (%1$d file)</string>
+    <string name="stock_gallery_loading">Ricerca file sulla fotocamera via Wi-Fi…</string>
+    <string name="stock_gallery_downloading">Scaricamento %1$s…</string>
+    <string name="stock_gallery_downloaded">Salvato %1$s in %2$s</string>
     <string name="import_folder">Importa cartella</string>
     <string name="import_listing">Ricerca di foto e video…</string>
     <string name="import_failed">Impossibile leggere la cartella. La scheda è ancora collegata?</string>
