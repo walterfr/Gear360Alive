@@ -542,6 +542,20 @@ Hipótese, ainda não testada: a listagem exige `SetOperationState` com `changeT
 
 A rede da câmera caiu em menos de 4 min depois de uma sonda, antes de qualquer SOAP. `AutoPowerOffValue` estava em `5min`, o que é a hipótese mais provável, mas não está confirmada. O M3 precisa medir isso, detectar a queda e reconectar.
 
+### Medição 2 da Fase 2: Eventos do botão físico (NOTIFY), 2026-11-11
+
+Validada escuta de eventos UPnP (`SUBSCRIBE` em `/smp_5_`) na porta 8059 enquanto o usuário opera o botão físico da câmera:
+- **Disparo detectado em tempo real:**
+  - `[10:20:07] NOTIFY: RVF_DEVICE_STATUS = Capture Started`
+  - `[10:20:08] NOTIFY: RVF_DEVICE_STATUS = Capture Finished`, `RVF_REMAIN_SHOT_COUNT_VALUE = 19668`
+- **Impacto no produto:** Confirma viabilidade total do **"Modo Companheiro"**. O app detecta a captura física sem precisar emitir o comando arriscado `Shot` (SOAP), abrindo caminho para download/sincronização automática das fotos em qualidade máxima de duas lentes (5792x2896).
+
+### Download na porta 9001 e Modo ML, 2026-11-11
+
+- A porta 9001 responde com `Server: Samsung HTTP streaming server` (DLNA streaming sob demanda).
+- O download direto via GET de arquivo estático sem mapeamento prévio é recusado com `ConnectionResetError`.
+- Engenharia reversa no APK oficial da Samsung revelou que a listagem de mídia e o download de arquivos exigem `SetOperationState` com `changeToML` (Media List), que prepara o streaming DLNA e o `Browse`.
+
 ### Pendências
 
 - Rodar nos modos "Connect to Android" e "Connect to Street View" (baixa prioridade: o caminho principal já responde).
