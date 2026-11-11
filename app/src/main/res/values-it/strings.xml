@@ -327,6 +327,7 @@
     <string name="stock_preview_opening">Apertura dell\'immagine della fotocamera, circa 10 secondi…</string>
     <string name="stock_preview_stop">Ferma l\'anteprima</string>
     <string name="stock_preview_wait">Dopo un\'anteprima la fotocamera non risponde per 1-2 minuti, poi torna da sola.</string>
+    <string name="stock_cooldown_countdown">Riavvio rete fotocamera: %1$d s rimanenti…</string>
     <string name="stock_read_only">Questa schermata legge soltanto. Non cambia nulla sulla fotocamera.</string>
     <string name="import_folder">Importa cartella</string>
     <string name="import_listing">Ricerca di foto e video…</string>

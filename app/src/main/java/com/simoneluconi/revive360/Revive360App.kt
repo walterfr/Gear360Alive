@@ -5,6 +5,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.simoneluconi.revive360.link.CameraController
+import com.simoneluconi.revive360.link.StockCameraController
 import com.simoneluconi.revive360.media.ImportController
 import com.simoneluconi.revive360.media.SavedFiles
 import com.simoneluconi.revive360.media.ThumbCache
@@ -18,6 +19,8 @@ class Revive360App : Application() {
         private set
     lateinit var controller: CameraController
         private set
+    lateinit var stockController: StockCameraController
+        private set
     lateinit var imports: ImportController
         private set
 
@@ -29,6 +32,7 @@ class Revive360App : Application() {
         store = CameraStore(this)
         imports = ImportController(this)
         controller = CameraController(this, store, settings, ThumbCache(this), SavedFiles(this))
+        stockController = StockCameraController(this, settings)
         // On the camera's Wi-Fi while the app is on screen, off it shortly after (battery, and the
         // phone's own Wi-Fi comes back)
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {

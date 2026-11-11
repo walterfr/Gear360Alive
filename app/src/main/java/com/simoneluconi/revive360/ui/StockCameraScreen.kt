@@ -1,6 +1,5 @@
 package com.simoneluconi.revive360.ui
 
-import android.net.Network
 import android.net.wifi.WifiManager
 import android.view.Surface
 import androidx.compose.foundation.layout.Arrangement
@@ -31,15 +30,18 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.simoneluconi.revive360.EventLog
 import com.simoneluconi.revive360.R
-import com.simoneluconi.revive360.link.CameraNetwork
+import com.simoneluconi.revive360.link.CameraHealthState
+import com.simoneluconi.revive360.link.SessionLayerState
+import com.simoneluconi.revive360.link.StockCameraController
+import com.simoneluconi.revive360.link.StockMode
+import com.simoneluconi.revive360.link.WifiLayerState
 import com.simoneluconi.revive360.media.LiveViewDecoder
 import com.simoneluconi.revive360.media.MediaSaver
-import com.simoneluconi.revive360.protocol.Connector
 import com.simoneluconi.revive360.protocol.FileKind
 import com.simoneluconi.revive360.protocol.LiveStream
-import com.simoneluconi.revive360.protocol.OscClient
 import com.simoneluconi.revive360.protocol.OscStatus
 import com.simoneluconi.revive360.protocol.Protocol
 import com.simoneluconi.revive360.protocol.StockClient
@@ -49,8 +51,6 @@ import com.simoneluconi.revive360.stitch.DualFisheye
 import com.simoneluconi.revive360.stitch.SphereVideoView
 import com.simoneluconi.revive360.ui.theme.LocalAppColors
 import java.io.File
-import java.io.IOException
-import java.net.HttpURLConnection
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CancellationException
@@ -59,15 +59,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class StockLink { IDLE, JOINING, CONNECTED, LOST, NOT_FOUND }
-
-private const val POLL_MS = 20_000L
-
 /**
  * A camera on its original firmware: joins the network the camera's menu started ("Connect to iOS"
  * for status and live preview, or "Connect to Street View" for remote 360° photo capture via OSC v1).
+ *
+ * Uses the persistent [StockCameraController] from [Revive360App] to preserve connection outside UI.
  */
-// ponytail: the network is released when the screen closes, not when the app goes to the background
 @Composable
 fun StockCameraScreen() {
     val nav = LocalActions.current
@@ -75,132 +72,51 @@ fun StockCameraScreen() {
     val colors = LocalAppColors.current
     val scope = rememberCoroutineScope()
     val settings = nav.app.settings
-    var oscMode by rememberSaveable { mutableStateOf(false) }
+    val controller = nav.app.stockController
+
+    val state by controller.state.collectAsStateWithLifecycle()
+
     var iosCode by rememberSaveable { mutableStateOf(settings.stockPassphrase.orEmpty()) }
     var oscCode by rememberSaveable { mutableStateOf(settings.oscPassphrase.orEmpty()) }
-    var link by remember { mutableStateOf(StockLink.IDLE) }
-    var client by remember { mutableStateOf<StockClient?>(null) }
-    var oscClient by remember { mutableStateOf<OscClient?>(null) }
-    var status by remember { mutableStateOf<StockStatus?>(null) }
-    var oscStatus by remember { mutableStateOf<OscStatus?>(null) }
-    var unanswered by remember { mutableStateOf(false) }
-    var live by remember { mutableStateOf(false) }
-    var afterLive by remember { mutableStateOf(false) }
+
     var shooting by remember { mutableStateOf(false) }
     var shotMessage by remember { mutableStateOf<String?>(null) }
     var shotError by remember { mutableStateOf<String?>(null) }
-    val network = remember { CameraNetwork(context) }
-    DisposableEffect(Unit) { onDispose { network.release() } }
 
-    fun resetLink() {
-        network.release()
-        link = StockLink.IDLE
-        client = null
-        oscClient = null
-        status = null
-        oscStatus = null
-        unanswered = false
-        live = false
-        afterLive = false
-        shotMessage = null
-        shotError = null
-    }
+    val activeMode = state.mode
+    val isOsc = activeMode == StockMode.OSC
+    val wifi = state.wifi
+    val session = state.session
 
-    // No status queries during a live view: that combination was never tested
-    LaunchedEffect(client, live) {
-        val camera = client ?: return@LaunchedEffect
-        if (live) return@LaunchedEffect
-        while (true) {
-            try {
-                status = withContext(Dispatchers.IO) { camera.status() }
-                unanswered = false
-            } catch (e: IOException) {
-                EventLog.log("Stock camera: no answer (${e.message})")
-                unanswered = true
-            }
-            delay(POLL_MS)
-        }
-    }
-
-    // No status queries while an OSC photo is being taken
-    LaunchedEffect(oscClient, shooting) {
-        val camera = oscClient ?: return@LaunchedEffect
-        if (shooting) return@LaunchedEffect
-        while (true) {
-            try {
-                oscStatus = withContext(Dispatchers.IO) { camera.status() }
-                unanswered = false
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                EventLog.log("OSC camera: no answer (${e.message})")
-                unanswered = true
-            }
-            delay(POLL_MS)
-        }
-    }
-
-    fun connect() {
-        val activeCode = if (oscMode) oscCode else iosCode
-        if (oscMode) settings.oscPassphrase = activeCode else settings.stockPassphrase = activeCode
-        status = null
-        oscStatus = null
-        client = null
-        oscClient = null
-        unanswered = false
-        shotMessage = null
-        shotError = null
-        link = StockLink.JOINING
-        network.requestStock(activeCode, object : CameraNetwork.Listener {
-            override fun onAvailable(network: Network, host: String) {
-                val connector = Connector { url -> network.openConnection(url) as HttpURLConnection }
-                if (oscMode) {
-                    oscClient = OscClient(host, connector = connector)
-                } else {
-                    client = StockClient(
-                        host,
-                        connector,
-                        openSocket = { network.socketFactory.createSocket() },
-                    )
-                }
-                link = StockLink.CONNECTED
-            }
-
-            override fun onLost() {
-                client = null
-                oscClient = null
-                link = StockLink.LOST
-            }
-
-            override fun onUnavailable() {
-                client = null
-                oscClient = null
-                link = StockLink.NOT_FOUND
-            }
-        })
-    }
+    val isConnected = wifi is WifiLayerState.Connected
+    val isLive = session is SessionLayerState.LivePreview
 
     ScreenScaffold(title = stringResource(R.string.stock_title)) {
-        if (!live && !shooting) {
+        if (!isLive && !shooting) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip(stringResource(R.string.stock_mode_ios), selected = !oscMode) {
-                    if (oscMode) {
-                        oscMode = false
-                        resetLink()
+                Chip(stringResource(R.string.stock_mode_ios), selected = !isOsc) {
+                    if (isOsc) {
+                        controller.setMode(StockMode.IOS)
+                        shotMessage = null
+                        shotError = null
                     }
                 }
-                Chip(stringResource(R.string.stock_mode_osc), selected = oscMode) {
-                    if (!oscMode) {
-                        oscMode = true
-                        resetLink()
+                Chip(stringResource(R.string.stock_mode_osc), selected = isOsc) {
+                    if (!isOsc) {
+                        controller.setMode(StockMode.OSC)
+                        shotMessage = null
+                        shotError = null
                     }
                 }
             }
         }
-        val activeCode = if (oscMode) oscCode else iosCode
-        if (link != StockLink.CONNECTED) {
+
+        val activeCode = if (isOsc) oscCode else iosCode
+
+        if (!isConnected) {
             Card {
                 Label(
-                    stringResource(if (oscMode) R.string.stock_osc_steps else R.string.stock_steps),
+                    stringResource(if (isOsc) R.string.stock_osc_steps else R.string.stock_steps),
                     color = colors.text2,
                 )
                 Spacer(Modifier.height(14.dp))
@@ -208,23 +124,35 @@ fun StockCameraScreen() {
                     value = activeCode,
                     onChange = { next ->
                         val cleaned = next.filter { c -> c.code in 0x20..0x7E }.take(Protocol.PASSPHRASE_MAX)
-                        if (oscMode) oscCode = cleaned else iosCode = cleaned
+                        if (isOsc) {
+                            oscCode = cleaned
+                            settings.oscPassphrase = cleaned
+                        } else {
+                            iosCode = cleaned
+                            settings.stockPassphrase = cleaned
+                        }
                     },
                     placeholder = stringResource(R.string.stock_code),
                     mono = true,
                     keyboard = KeyboardOptions(keyboardType = KeyboardType.Password),
                 )
                 Spacer(Modifier.height(14.dp))
+                val isConnecting = wifi is WifiLayerState.Connecting
                 PillButton(
-                    stringResource(if (link == StockLink.JOINING) R.string.stock_joining else R.string.stock_connect),
+                    stringResource(if (isConnecting) R.string.stock_joining else R.string.stock_connect),
                     Modifier.fillMaxWidth(),
                     icon = AppIcons.Wifi,
                     style = ButtonStyle.PRIMARY,
-                    enabled = Protocol.isValidPassphrase(activeCode) && link != StockLink.JOINING,
-                ) { connect() }
-                val problem = when (link) {
-                    StockLink.LOST -> stringResource(R.string.stock_lost)
-                    StockLink.NOT_FOUND -> stringResource(R.string.stock_not_found)
+                    enabled = Protocol.isValidPassphrase(activeCode) && !isConnecting,
+                ) {
+                    shotMessage = null
+                    shotError = null
+                    controller.connect()
+                }
+
+                val problem = when (wifi) {
+                    is WifiLayerState.Lost -> stringResource(R.string.stock_lost)
+                    is WifiLayerState.Unavailable -> stringResource(R.string.stock_not_found)
                     else -> null
                 }
                 if (problem != null) {
@@ -232,22 +160,25 @@ fun StockCameraScreen() {
                     Label(problem, size = 14.sp, color = colors.bad)
                 }
             }
-        } else if (oscMode) {
+        } else if (isOsc) {
             Card {
-                val current = oscStatus
-                if (current == null) {
-                    Label(stringResource(if (unanswered) R.string.stock_no_answer else R.string.stock_reading), color = colors.text2)
-                } else {
-                    StatusLine(stringResource(R.string.stock_battery), current.batteryPercent?.let { "$it%" } ?: "?")
-                    StatusLine(stringResource(R.string.info_model), current.model ?: "?")
-                    StatusLine(stringResource(R.string.stock_firmware), current.firmware ?: "?")
-                    if (unanswered) {
-                        Spacer(Modifier.height(8.dp))
+                when (val health = state.health) {
+                    is CameraHealthState.HealthyOsc -> {
+                        val current = health.status
+                        StatusLine(stringResource(R.string.stock_battery), current.batteryPercent?.let { "$it%" } ?: "?")
+                        StatusLine(stringResource(R.string.info_model), current.model ?: "?")
+                        StatusLine(stringResource(R.string.stock_firmware), current.firmware ?: "?")
+                    }
+                    is CameraHealthState.Unresponsive -> {
                         Label(stringResource(R.string.stock_no_answer), size = 14.sp, color = colors.bad)
+                    }
+                    else -> {
+                        Label(stringResource(R.string.stock_reading), color = colors.text2)
                     }
                 }
             }
-            val camera = oscClient
+
+            val camera = controller.oscClient
             if (camera != null) {
                 Card {
                     PillButton(
@@ -258,6 +189,7 @@ fun StockCameraScreen() {
                         enabled = !shooting,
                     ) {
                         shooting = true
+                        controller.setSessionState(SessionLayerState.CapturingPhoto)
                         shotMessage = null
                         shotError = null
                         scope.launch {
@@ -285,6 +217,7 @@ fun StockCameraScreen() {
                             } finally {
                                 tmp.delete()
                                 shooting = false
+                                controller.setSessionState(SessionLayerState.Idle)
                             }
                         }
                     }
@@ -300,27 +233,37 @@ fun StockCameraScreen() {
             }
         } else {
             Card {
-                val current = status
-                if (current == null) {
-                    Label(stringResource(if (unanswered) R.string.stock_no_answer else R.string.stock_reading), color = colors.text2)
-                } else {
-                    StatusLine(stringResource(R.string.stock_battery), batteryText(current))
-                    StatusLine(stringResource(R.string.stock_card), cardText(current))
-                    StatusLine(stringResource(R.string.stock_mode), current.mode ?: "?")
-                    StatusLine(stringResource(R.string.stock_auto_off), current.autoPowerOff ?: "?")
-                    StatusLine(stringResource(R.string.stock_firmware), current.firmware ?: "?")
-                    if (unanswered) {
-                        Spacer(Modifier.height(8.dp))
+                when (val health = state.health) {
+                    is CameraHealthState.HealthyIos -> {
+                        val current = health.status
+                        StatusLine(stringResource(R.string.stock_battery), batteryText(current))
+                        StatusLine(stringResource(R.string.stock_card), cardText(current))
+                        StatusLine(stringResource(R.string.stock_mode), current.mode ?: "?")
+                        StatusLine(stringResource(R.string.stock_auto_off), current.autoPowerOff ?: "?")
+                        StatusLine(stringResource(R.string.stock_firmware), current.firmware ?: "?")
+                    }
+                    is CameraHealthState.Unresponsive -> {
                         Label(stringResource(R.string.stock_no_answer), size = 14.sp, color = colors.bad)
+                    }
+                    else -> {
+                        Label(stringResource(R.string.stock_reading), color = colors.text2)
                     }
                 }
             }
-            val camera = client
+
+            val camera = controller.stockClient
             if (Features.EXPERIMENTAL && camera != null) {
-                if (live) {
+                if (isLive) {
                     StockPreview(camera) {
-                        live = false
-                        afterLive = true
+                        controller.startCooldown(seconds = 60)
+                    }
+                } else if (session is SessionLayerState.CoolingDown) {
+                    Card {
+                        Label(
+                            stringResource(R.string.stock_cooldown_countdown, session.secondsRemaining),
+                            size = 14.sp,
+                            color = colors.text2
+                        )
                     }
                 } else {
                     Card {
@@ -330,12 +273,11 @@ fun StockCameraScreen() {
                             icon = AppIcons.Live,
                             style = ButtonStyle.PRIMARY,
                         ) {
-                            afterLive = false
-                            live = true
+                            controller.setSessionState(SessionLayerState.LivePreview)
                         }
                         Spacer(Modifier.height(10.dp))
                         Label(
-                            stringResource(if (afterLive) R.string.stock_preview_wait else R.string.stock_preview_note),
+                            stringResource(R.string.stock_preview_note),
                             size = 14.sp,
                             color = colors.text2,
                         )
@@ -361,8 +303,8 @@ private fun StockPreview(camera: StockClient, onClose: () -> Unit) {
     val view = remember { AtomicReference<SphereVideoView?>(null) }
     val model = remember { DualFisheye(focal = CameraMetadata.R210_FOCAL, lensPoly = CameraMetadata.R210_POLY) }
     val context = LocalContext.current
+
     DisposableEffect(Unit) {
-        // Wi-Fi power saving delays bursts: the tablet got 9.6 of the camera's 15 pictures a second
         val wifi = context.applicationContext.getSystemService(WifiManager::class.java)
         val lock = wifi?.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "gear360alive:preview")
         runCatching { lock?.acquire() }.onFailure { EventLog.log("Wi-Fi low latency lock: ${it.message}") }
@@ -371,6 +313,7 @@ private fun StockPreview(camera: StockClient, onClose: () -> Unit) {
             runCatching { if (lock?.isHeld == true) lock.release() }
         }
     }
+
     LaunchedEffect(Unit) {
         var last = 0L
         while (true) {
@@ -382,9 +325,9 @@ private fun StockPreview(camera: StockClient, onClose: () -> Unit) {
 
     Card {
         AndroidView(
-            factory = { context ->
+            factory = { ctx ->
                 SphereVideoView(
-                    context = context,
+                    context = ctx,
                     model = model,
                     onSurfaceReady = { surface ->
                         session.start(
@@ -396,7 +339,6 @@ private fun StockPreview(camera: StockClient, onClose: () -> Unit) {
                             onFrame = { frames = it },
                         ) { error = it }
                     },
-                    // A locked screen ends the session: reopening by itself could find the camera restarting
                     onSurfaceDestroyed = {
                         session.stop()
                         onClose()
@@ -435,7 +377,6 @@ private class StockLiveSession(private val camera: StockClient) {
     private var worker: Thread? = null
     @Volatile private var stopping = false
 
-    /** Once per session: a second surface does not open the camera again. */
     fun start(surface: Surface, onSize: (Int, Int) -> Unit, onFrame: (Long) -> Unit, onError: (String) -> Unit) {
         if (worker != null) return
         worker = thread(name = "stock-live") {

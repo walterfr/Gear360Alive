@@ -329,6 +329,7 @@
     <string name="stock_preview_opening">Opening the camera\'s picture, about 10 seconds…</string>
     <string name="stock_preview_stop">Stop the preview</string>
     <string name="stock_preview_wait">After a preview the camera stops answering for 1 to 2 minutes, then comes back by itself.</string>
+    <string name="stock_cooldown_countdown">Camera network restarting: %1$d s remaining…</string>
     <string name="stock_read_only">This screen only reads. It changes nothing on the camera.</string>
     <string name="stock_mode_ios">Connect to iOS</string>
     <string name="stock_mode_osc">Street View (OSC)</string>
