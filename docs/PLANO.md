@@ -548,3 +548,49 @@ A rede da câmera caiu em menos de 4 min depois de uma sonda, antes de qualquer 
 - `Browse` do contêiner 8 e GET de um arquivo na porta 9001. O cartão quase não tem dados, então vale gravar amostras antes.
 - Copiar amostras do cartão.
 - Os relatórios contêm identificadores da câmera; ficam fora do git. Anonimizar antes de virar fixtures.
+
+## 14. Plano de Conexão e Evolução do Produto (4 Fases)
+
+Plano em 4 fases. A primeira não exige nenhum comando novo à câmera e resolve a base de quase todos os problemas: hoje a conexão vive dentro da tela (`StockCameraScreen`, 491 linhas) e morre com ela.
+
+### Fase 1: núcleo de conexão (só app, risco zero para a câmera)
+- **Controlador único de câmera:** fora da interface, dono da rede, da sessão e do estado. As telas só observam.
+- **Estado em camadas:** Wi-Fi conectado, câmera responde, sessão ativa. Cada queda registra horário e camada, o que separa os quatro tipos de “desconectou” descritos no `AGENTS.md`.
+- **Espera conhecida vira contagem:** depois de fechar preview, a câmera some por 30 a 107 s. O app mostra “câmera reiniciando a rede” em vez de erro.
+- **Reconexão com espera crescente e limite:** sem nunca repetir captura nem reabrir stream sozinha.
+- **Uma tela “Câmera” para os dois modos:** o app detecta qual rede está no ar (`Gear 360(7F97)` ou `.OSC`) e mostra o que aquele modo oferece, com instrução de como trocar no menu da câmera.
+- **Preview com fila de um quadro:** leitura da rede e decodificação em threads separadas, sempre mostrando o quadro mais recente. Hoje a regra de pular quadro quase nunca dispara.
+
+### Fase 2: medições só de leitura (cada uma com sua aprovação)
+- **Baixar arquivo pela porta 9001:** usando o `LastFileURL` que a câmera já informa. Se funcionar, abre importação sem cartão.
+- **Eventos do botão:** assinar `NOTIFY`, você aperta o botão da câmera e vemos se `RVF_LAST_PHOTO_URL_VALUE` e `RVF_BUTTON_ACTION` chegam preenchidos.
+- **Desligamento automático:** medir se consultas periódicas impedem o desligamento em 5 min (`AutoPowerOffValue`).
+- **Preview longo com e sem Wi-Fi de baixa latência:** registrando sinal e velocidade do link.
+
+### Fase 3: comandos que mudam estado (um por vez, PC primeiro)
+- `changeToML` + `Browse`: galeria e download sem fio.
+- OSC `setOptions` (HDR) e `listImages`.
+- `StartRecord`/`StopRecord` dentro da sessão completa: aparecem no log do app oficial na C200. É o caminho para vídeo remoto.
+- `Shot` dentro da sessão, só se ainda fizer falta foto remota em duas lentes.
+
+### Fase 4: qualidade de imagem (só app)
+- **Emenda adaptativa:** medir o deslocamento na faixa de sobreposição e ajustar a costura por região, com suavização no tempo para vídeo.
+- **Decodificar `acgy` nas amostras:** em busca de giroscópio bruto com guinada.
+- **Empilhamento de fotos em tripé:** para reduzir ruído.
+
+### Limitações da câmera e o que dá para fazer
+
+| Limitação | Contorno | Situação |
+|---|---|---|
+| Foto remota só costurada (5472x2736) | Modo “companheiro”: você aperta o botão, o app recebe o evento, baixa o original em duas lentes e costura | Hipótese, depende da fase 2 |
+| Sem vídeo remoto | `StartRecord` na sessão; ou botão + download automático | Hipótese, fase 3 |
+| Dois modos que não coexistem | Tela única que detecta o modo | Fase 1 |
+| Preview 1280x640 com atraso | Fila de um quadro; `bc_high` dá nível do horizonte | Parcial: resolução e Wi-Fi da câmera não mudam |
+| Paralaxe em objetos próximos | Emenda adaptativa | Reduz, não elimina: é óptico |
+| `vrot` sem guinada | `acgy` ou estimativa visual | Incerto |
+| Aquecimento (desligou em 4:30) | O app oficial trata avisos de superaquecimento; mostrar esses eventos | Avisa, não evita |
+| Sem RAW nem controles manuais | Só com firmware modificado, fora das regras | Sem solução no firmware original |
+| Tablet não decodifica 4K | Gravar em 2560x1280 ou processar em outro aparelho | Limite do tablet, não da câmera |
+
+**Recomendação:** começar pela fase 1. O modo “companheiro” é a aposta de maior retorno: entrega foto e vídeo em qualidade máxima sem depender de `Shot`, mas só vale investir depois das duas primeiras medições da fase 2.
+
