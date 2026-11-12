@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.Network
 import com.simoneluconi.revive360.EventLog
 import com.simoneluconi.revive360.media.MediaSaver
+import com.simoneluconi.revive360.media.PhoneItem
+import com.simoneluconi.revive360.media.PhoneMedia
 import com.simoneluconi.revive360.protocol.Connector
 import com.simoneluconi.revive360.protocol.FileKind
 import com.simoneluconi.revive360.protocol.OscClient
@@ -31,6 +33,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 enum class StockMode {
@@ -74,6 +77,8 @@ data class StockCameraState(
     val downloading: String? = null,
     val lastDownloaded: String? = null,
     val mediaError: String? = null,
+    /** [PhoneItem.savedKey]s of the files already on the phone, read when the gallery opens */
+    val saved: Set<String> = emptySet(),
 )
 
 /**
@@ -97,6 +102,8 @@ class StockCameraController(
     private var releaseJob: Job? = null
 
     @Volatile private var mediaSession: StockClient.MediaSession? = null
+    /** Changes whenever the gallery is dismissed: a listing still on its way then ends its session. */
+    private val mediaRequest = AtomicInteger()
     /** One request to the camera's media server at a time: thumbnails, downloads and the session's end. */
     private val mediaLane = Mutex()
     private val thumbnails = ConcurrentHashMap<String, ByteArray>()
@@ -294,23 +301,39 @@ class StockCameraController(
         if (current.session !is SessionLayerState.Idle || current.mediaLoading) return
         setSessionState(SessionLayerState.MediaLibrary)
         _state.update { it.copy(mediaLoading = true, mediaError = null, lastDownloaded = null) }
+        val request = mediaRequest.incrementAndGet()
         scope.launch {
             try {
                 val session = withContext(Dispatchers.IO) { client.openMediaSession() }
-                if (stockClient !== client) {
-                    // The link went away meanwhile: nothing to show, only the session's port to free
-                    thread(isDaemon = true) { session.close() }
+                if (request != mediaRequest.get() || stockClient !== client) {
+                    // Dismissed while listing (screen left, mode changed, link gone): ended, never kept
+                    EventLog.log("Stock gallery: dismissed while listing, ending its session")
+                    withContext(Dispatchers.IO) { session.close() }
+                    endListing(cameraSessionEnded = true)
                     return@launch
                 }
                 mediaSession = session
-                _state.update { it.copy(media = session.items, mediaLoading = false) }
+                val saved = withContext(Dispatchers.IO) {
+                    runCatching { PhoneMedia.list(appContext).map { PhoneItem.savedKey(it.name) }.toSet() }
+                        .getOrDefault(emptySet())
+                }
+                _state.update { it.copy(media = session.items, mediaLoading = false, saved = saved) }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 EventLog.log("Stock gallery failed: ${e.message}")
-                _state.update { it.copy(mediaLoading = false, mediaError = e.message ?: e.javaClass.simpleName) }
-                if (_state.value.session is SessionLayerState.MediaLibrary) setSessionState(SessionLayerState.Idle)
+                if (request == mediaRequest.get()) {
+                    _state.update { it.copy(mediaLoading = false, mediaError = e.message ?: e.javaClass.simpleName) }
+                }
+                endListing(cameraSessionEnded = false)
             }
         }
+    }
+
+    /** Out of the gallery state after a listing that showed nothing; the countdown if the camera was told to end. */
+    private fun endListing(cameraSessionEnded: Boolean) {
+        val current = _state.value
+        if (current.session !is SessionLayerState.MediaLibrary) return
+        if (cameraSessionEnded && current.wifi is WifiLayerState.Connected) startCooldown() else setSessionState(SessionLayerState.Idle)
     }
 
     /**
@@ -325,10 +348,11 @@ class StockCameraController(
         }
     }
 
-    /** Saves one of the camera's files to the phone. One at a time. */
+    /** Saves one of the camera's files to the phone. One at a time, and never a file already there. */
     fun download(item: StockMediaItem) {
         val client = stockClient ?: return
-        if (mediaSession == null || _state.value.downloading != null) return
+        val current = _state.value
+        if (mediaSession == null || current.downloading != null || PhoneItem.savedKey(item.title) in current.saved) return
         _state.update { it.copy(downloading = item.title, mediaError = null, lastDownloaded = null) }
         scope.launch {
             // Not the file's own name: that text comes from the camera
@@ -348,7 +372,7 @@ class StockCameraController(
                     }
                 }
                 EventLog.log("Stock gallery: saved ${item.title}")
-                _state.update { it.copy(lastDownloaded = item.title) }
+                _state.update { it.copy(lastDownloaded = item.title, saved = it.saved + PhoneItem.savedKey(item.title)) }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 EventLog.log("Stock gallery: ${item.title} failed: ${e.message}")
@@ -373,10 +397,11 @@ class StockCameraController(
 
     /** The open session, taken out of the state: the caller ends it. */
     private fun takeMedia(): StockClient.MediaSession? {
+        mediaRequest.incrementAndGet()
         val session = mediaSession
         mediaSession = null
         thumbnails.clear()
-        _state.update { it.copy(media = null, mediaLoading = false, mediaError = null, lastDownloaded = null) }
+        _state.update { it.copy(media = null, mediaLoading = false, mediaError = null, lastDownloaded = null, saved = emptySet()) }
         return session
     }
 
@@ -426,7 +451,8 @@ class StockCameraController(
                 _state.update { it.copy(session = SessionLayerState.CoolingDown(remaining)) }
                 delay(1000L)
             }
-            _state.update { it.copy(session = SessionLayerState.Idle) }
+            // Through setSessionState: it starts the status polling again
+            setSessionState(SessionLayerState.Idle)
             onFinished()
         }
     }

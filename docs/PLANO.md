@@ -580,6 +580,8 @@ Testada a comutação oficial para o modo Media List via SOAP:
   - Baixado o vídeo `360_0314.mp4` (911.012 bytes) com HTTP GET padrão em **0,23 s (~30 Mbps)** com SHA-256 verificado.
 - **Impacto no produto:** Desbloqueia a galeria sem fio completa no app. O usuário pode visualizar miniaturas e baixar fotos/vídeos originais da Gear 360 sem precisar remover o cartão de memória.
 
+**Galeria no app, 2026-11-12, validada no tablet pelo dono** (sair da tela no meio da listagem, fechar a galeria com o status voltando depois da contagem, e o tique de arquivo já salvo): a sessão de mídia vive no `StockCameraController` (fecha ao sair da tela, trocar de modo, desconectar ou perder o Wi-Fi; listagem dispensada no meio também é encerrada), lista todos os arquivos, busca miniaturas e downloads um de cada vez e volta a ler o status depois da contagem de espera. Arquivo já salvo no tablet aparece com tique na miniatura e ao lado do nome e não é baixado de novo. A comparação usa `PhoneItem.savedKey`, que ignora maiúsculas e o " (1)" do Android: a câmera lista `SAM_0307.jpg`, a cópia salva pelo OSC é `SAM_0307.JPG`, e salvar de novo criaria `SAM_0307 (1).jpg`.
+
 ### Pendências
 
 - Rodar nos modos "Connect to Android" e "Connect to Street View" (baixa prioridade: o caminho principal já responde).

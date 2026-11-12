@@ -38,6 +38,13 @@ data class PhoneItem(
         fun isStitchedName(name: String): Boolean = plainName(name).endsWith(STITCHED_SUFFIX)
 
         fun isOriginalName(name: String): Boolean = ORIGINAL.matches(plainName(name))
+
+        /**
+         * The same file whatever its case or the system's " (1)": the camera lists `SAM_0307.jpg`,
+         * the copy saved from Street View is `SAM_0307.JPG`, and a second save becomes `SAM_0307 (1).jpg`.
+         */
+        fun savedKey(name: String): String =
+            (plainName(name) + "." + name.substringAfterLast('.', "")).lowercase()
     }
 }
 

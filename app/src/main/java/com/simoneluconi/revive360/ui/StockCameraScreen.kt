@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -56,7 +57,7 @@ import com.simoneluconi.revive360.link.StockMode
 import com.simoneluconi.revive360.link.WifiLayerState
 import com.simoneluconi.revive360.media.LiveViewDecoder
 import com.simoneluconi.revive360.media.MediaSaver
-import com.simoneluconi.revive360.media.PhoneMedia
+import com.simoneluconi.revive360.media.PhoneItem
 import com.simoneluconi.revive360.protocol.FileKind
 import com.simoneluconi.revive360.protocol.LiveStream
 import com.simoneluconi.revive360.protocol.OscStatus
@@ -309,55 +310,47 @@ fun StockCameraScreen() {
                             weight = FontWeight.Bold
                         )
                         Spacer(Modifier.height(8.dp))
-                        val savedItems = remember(currentItems, downloadingName) {
-                            runCatching { PhoneMedia.list(context).map { it.name }.toSet() }.getOrDefault(emptySet())
-                        }
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             // ponytail: one Browse page (100 files); page with StartingIndex when a card holds more
                             currentItems.forEach { item ->
-                                val isDownloaded = item.title in savedItems
+                                // Already on the phone: marked, and not saved a second time
+                                val isDownloaded = PhoneItem.savedKey(item.title) in state.saved
                                 val isCurDownloading = downloadingName == item.title
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
-                                        .clickable(enabled = downloadingName == null) { controller.download(item) }
+                                        .clickable(enabled = downloadingName == null && !isDownloaded) { controller.download(item) }
                                         .padding(vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    StockMediaThumbnail(controller, item)
+                                    StockMediaThumbnail(controller, item, saved = isDownloaded)
                                     Spacer(Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Label(
-                                            if (isCurDownloading) stringResource(R.string.stock_gallery_downloading, item.title) else item.title,
-                                            size = 14.sp,
-                                            color = if (isCurDownloading) colors.accent else colors.text
-                                        )
-                                        if (item.sizeBytes > 0) {
-                                            Label(
-                                                "${item.sizeBytes / (1024 * 1024)} MB",
-                                                size = 12.sp,
-                                                color = colors.text2
-                                            )
-                                        }
-                                    }
-                                    if (isDownloaded) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(colors.good.copy(alpha = 0.15f))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         ) {
-                                            Icon(AppIcons.Check, color = colors.good, size = 14.dp)
+                                            if (isDownloaded) Icon(AppIcons.Check, color = colors.good, size = 16.dp)
                                             Label(
-                                                stringResource(R.string.stock_gallery_already_saved),
-                                                size = 11.sp,
-                                                color = colors.good,
-                                                weight = FontWeight.Bold
+                                                if (isCurDownloading) stringResource(R.string.stock_gallery_downloading, item.title) else item.title,
+                                                size = 14.sp,
+                                                color = when {
+                                                    isCurDownloading -> colors.accent
+                                                    isDownloaded -> colors.good
+                                                    else -> colors.text
+                                                },
+                                                weight = if (isDownloaded) FontWeight.Bold else FontWeight.SemiBold,
                                             )
                                         }
+                                        Label(
+                                            listOfNotNull(
+                                                item.sizeBytes.takeIf { it > 0 }?.let { "${it / (1024 * 1024)} MB" },
+                                                if (isDownloaded) stringResource(R.string.stock_gallery_already_saved) else null,
+                                            ).joinToString(" · "),
+                                            size = 12.sp,
+                                            color = if (isDownloaded) colors.good else colors.text2
+                                        )
                                     }
                                 }
                             }
@@ -540,7 +533,7 @@ private class StockLiveSession(private val camera: StockClient) {
 }
 
 @Composable
-private fun StockMediaThumbnail(controller: StockCameraController, item: StockMediaItem) {
+private fun StockMediaThumbnail(controller: StockCameraController, item: StockMediaItem, saved: Boolean) {
     val colors = LocalAppColors.current
     var bitmap by remember(item.thumbUrl) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(item.thumbUrl) {
@@ -571,6 +564,19 @@ private fun StockMediaThumbnail(controller: StockCameraController, item: StockMe
                 color = colors.text2,
                 size = 20.dp
             )
+        }
+        if (saved) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(2.dp)
+                    .size(18.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(colors.good),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(AppIcons.Check, color = Color.White, size = 12.dp)
+            }
         }
     }
 }
