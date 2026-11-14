@@ -272,15 +272,6 @@ fun StockCameraScreen() {
             }
 
             val camera = controller.stockClient
-            if (session is SessionLayerState.CoolingDown) {
-                Card {
-                    Label(
-                        stringResource(R.string.stock_cooldown_countdown, session.secondsRemaining),
-                        size = 14.sp,
-                        color = colors.text2
-                    )
-                }
-            }
             if (camera != null) {
                 // Card for Wireless Media Gallery / Download
                 Card {
@@ -375,13 +366,15 @@ fun StockCameraScreen() {
                 }
             }
 
-            if (Features.EXPERIMENTAL && camera != null) {
+            val cameraSession = controller.cameraSession
+            if (Features.EXPERIMENTAL && camera != null && cameraSession != null) {
                 if (isLive) {
-                    StockPreview(camera) {
-                        controller.startCooldown(seconds = 60)
+                    // The link's session stays: closing the preview only stops the stream
+                    StockPreview(camera, cameraSession) {
+                        controller.setSessionState(SessionLayerState.Idle)
                     }
                 } else if (session is SessionLayerState.Idle) {
-                    // Only from idle: never over an open gallery session
+                    // Only from idle: never over an open gallery
                     Card {
                         PillButton(
                             stringResource(R.string.stock_preview),
@@ -408,20 +401,23 @@ fun StockCameraScreen() {
                 Modifier.fillMaxWidth(),
                 icon = AppIcons.Close,
             ) { controller.disconnect() }
+            if (!isOsc) {
+                Label(stringResource(R.string.stock_disconnect_note), size = 13.sp, color = colors.text2)
+            }
         }
     }
 }
 
 /** The camera's live picture over its original firmware: one session, never reopened by itself. */
 @Composable
-private fun StockPreview(camera: StockClient, onClose: () -> Unit) {
+private fun StockPreview(camera: StockClient, cameraSession: StockClient.Session, onClose: () -> Unit) {
     val colors = LocalAppColors.current
     var size by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var frames by remember { mutableLongStateOf(0L) }
     var fps by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var raw by rememberSaveable { mutableStateOf(false) }
-    val session = remember { StockLiveSession(camera) }
+    val session = remember { StockLiveSession(camera, cameraSession) }
     val view = remember { AtomicReference<SphereVideoView?>(null) }
     val model = remember { DualFisheye(focal = CameraMetadata.R210_FOCAL, lensPoly = CameraMetadata.R210_POLY) }
     val context = LocalContext.current
@@ -494,7 +490,7 @@ private fun StockPreview(camera: StockClient, onClose: () -> Unit) {
     }
 }
 
-private class StockLiveSession(private val camera: StockClient) {
+private class StockLiveSession(private val camera: StockClient, private val cameraSession: StockClient.Session) {
     private val stream = AtomicReference<LiveStream?>(null)
     private var worker: Thread? = null
     @Volatile private var stopping = false
@@ -503,7 +499,7 @@ private class StockLiveSession(private val camera: StockClient) {
         if (worker != null) return
         worker = thread(name = "stock-live") {
             try {
-                val opened = camera.openLive()
+                val opened = camera.openLive(cameraSession)
                 stream.set(opened)
                 if (stopping) return@thread
                 EventLog.log("Stock live view: ${opened.contentType}")

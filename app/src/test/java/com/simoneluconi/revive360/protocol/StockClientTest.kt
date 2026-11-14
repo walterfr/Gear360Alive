@@ -19,6 +19,7 @@ class StockClientTest {
     private fun resource(name: String) = javaClass.getResource("/stock/$name")!!.readText()
     private val requests: MutableList<String> = Collections.synchronizedList(mutableListOf())
     private val bodies: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val renewals: MutableList<String> = Collections.synchronizedList(mutableListOf())
     private var server: HttpServer? = null
     private var giveSid = true
     private var infoStatus = 200
@@ -35,11 +36,18 @@ class StockClientTest {
             requests += "${exchange.requestMethod} ${exchange.requestURI.path} ${soap ?: sid.orEmpty()}".trim()
             bodies += exchange.requestBody.readBytes().decodeToString()
             if (exchange.requestMethod == "SUBSCRIBE") {
-                val callback = exchange.requestHeaders.getFirst("CALLBACK")!!.trim('<', '>').removePrefix("http://")
-                val (address, path) = callback.split("/", limit = 2)
-                Socket(address.substringBefore(':'), address.substringAfter(':').toInt()).use { s ->
-                    s.getOutputStream().write("NOTIFY /$path HTTP/1.1\r\nContent-Length: 3\r\n\r\nabc".toByteArray())
-                    notifyAnswer = s.getInputStream().bufferedReader().readLine()
+                val callbackHeader = exchange.requestHeaders.getFirst("CALLBACK")
+                renewals += exchange.requestHeaders.getFirst("TIMEOUT").orEmpty() +
+                    (if (callbackHeader == null) " renewal" else " new") +
+                    (if (exchange.requestHeaders.getFirst("NT") == null) "" else " NT")
+                // A new subscription gets the first NOTIFY; a renewal (SID only) does not
+                if (callbackHeader != null) {
+                    val callback = callbackHeader.trim('<', '>').removePrefix("http://")
+                    val (address, path) = callback.split("/", limit = 2)
+                    Socket(address.substringBefore(':'), address.substringAfter(':').toInt()).use { s ->
+                        s.getOutputStream().write("NOTIFY /$path HTTP/1.1\r\nContent-Length: 3\r\n\r\nabc".toByteArray())
+                        notifyAnswer = s.getInputStream().bufferedReader().readLine()
+                    }
                 }
                 if (giveSid) exchange.responseHeaders.set("SID", "uuid:fake")
             }
@@ -75,10 +83,6 @@ class StockClientTest {
         )
     }
 
-    private fun waitFor(request: String) {
-        val until = System.currentTimeMillis() + 3_000
-        while (request !in requests && System.currentTimeMillis() < until) Thread.sleep(20)
-    }
 
     @After
     fun stop() {
@@ -121,14 +125,35 @@ class StockClientTest {
     @Test
     fun theAllowedActionsAreOnlyQueries() {
         assertEquals(setOf("X_GetSettingInformation", "X_GetStorage"), StockQuery.entries.map { it.name }.toSet())
-        assertEquals(listOf("SetOperationState", "GetInfomation"), StockSessionAction.entries.map { it.name })
+        assertEquals(
+            setOf("SetOperationState", "GetInfomation", "Browse"),
+            StockSessionAction.entries.map { it.wire }.toSet(),
+        )
     }
 
     @Test
-    fun opensTheLiveViewInTheTestedOrderAndEndsTheSession() {
-        val stream = client().openLive()
-        assertTrue(stream.input.readBytes().contentEquals(live))
+    fun theSessionIsRenewedAndNeverEndedWithUnsubscribe() {
+        val camera = client()
+        val session = camera.openSession()
         assertEquals("HTTP/1.1 200 OK", notifyAnswer)
+        assertEquals("uuid:fake", session.sid)
+        session.renew()
+        session.renew()
+        // The tested renewal: the SID and a TIMEOUT, with no CALLBACK and no NT
+        assertEquals(listOf("Second-120 new NT", "Second-120 renewal", "Second-120 renewal"), renewals.toList())
+        assertEquals(listOf("SUBSCRIBE /smp_5_ uuid:fake", "SUBSCRIBE /smp_5_ uuid:fake"), requests.drop(2))
+        session.close()
+        session.close()
+        // UNSUBSCRIBE turns the camera's Wi-Fi off (2026-11-14): it is never sent
+        assertTrue(requests.none { it.startsWith("UNSUBSCRIBE") })
+    }
+
+    @Test
+    fun opensTheLiveViewInTheTestedOrderInsideTheSession() {
+        val camera = client()
+        val session = camera.openSession()
+        val stream = camera.openLive(session)
+        assertTrue(stream.input.readBytes().contentEquals(live))
         assertEquals(
             listOf(
                 "GET /smp_2_",
@@ -142,20 +167,22 @@ class StockClientTest {
         assertTrue(bodies[2].contains("<StateEvent>changeToRVF</StateEvent>"))
         assertFalse(bodies[3].contains("GPSINFO"))
         stream.close()
-        waitFor("UNSUBSCRIBE /smp_5_ uuid:fake")
-        assertEquals("UNSUBSCRIBE /smp_5_ uuid:fake", requests.last())
+        Thread.sleep(200)
+        assertTrue(requests.none { it.startsWith("UNSUBSCRIBE") })
     }
 
     @Test
-    fun theGalleryFollowsTheTestedOrderAndItsCloseEndsTheSessionBeforeReturning() {
+    fun theGallerySetsMediaListModeOnceAndDownloadsOnlyFromTheCamera() {
         val camera = client()
-        val session = camera.openMediaSession()
+        val session = camera.openSession()
+        val item = camera.browseMedia(session).single()
+        camera.browseMedia(session)
+        // changeToML only once in the session; listing again only browses
         assertEquals(
-            listOf("GET /smp_2_", "SUBSCRIBE /smp_5_", "POST /smp_4_ SetOperationState", "POST /smp_4_ Browse"),
+            listOf("GET /smp_2_", "SUBSCRIBE /smp_5_", "POST /smp_4_ SetOperationState", "POST /smp_4_ Browse", "POST /smp_4_ Browse"),
             requests.toList(),
         )
         assertTrue(bodies[2].contains("<StateEvent>changeToML</StateEvent>"))
-        val item = session.items.single()
         val saved = File.createTempFile("stock", ".jpg")
         try {
             camera.download(item.mediaUrl, saved)
@@ -166,23 +193,24 @@ class StockClientTest {
             saved.delete()
         }
         session.close()
-        assertEquals("UNSUBSCRIBE /smp_5_ uuid:fake", requests.last())
-        session.close()
-        assertEquals(1, requests.count { it.startsWith("UNSUBSCRIBE") })
+        assertTrue(requests.none { it.startsWith("UNSUBSCRIBE") })
     }
 
     @Test
-    fun withoutASubscriptionNothingElseIsSent() {
+    fun withoutASubscriptionNoSessionOpens() {
         giveSid = false
-        assertThrows(IOException::class.java) { client().openLive() }
+        assertThrows(IOException::class.java) { client().openSession() }
         assertEquals(listOf("GET /smp_2_", "SUBSCRIBE /smp_5_"), requests.toList())
     }
 
     @Test
-    fun aFailedStepStillEndsTheSessionAndOpensNoStream() {
+    fun aFailedStepOpensNoStreamAndLeavesTheSession() {
         infoStatus = 500
-        assertThrows(IOException::class.java) { client().openLive() }
-        assertTrue(requests.none { it.contains("livestream") })
-        assertEquals("UNSUBSCRIBE /smp_5_ uuid:fake", requests.last())
+        val camera = client()
+        val session = camera.openSession()
+        assertThrows(IOException::class.java) { camera.openLive(session) }
+        assertTrue(requests.none { it.contains("livestream") || it.startsWith("UNSUBSCRIBE") })
+        session.renew()
+        assertEquals("SUBSCRIBE /smp_5_ uuid:fake", requests.last())
     }
 }

@@ -41,10 +41,9 @@ class StockCameraControllerTest {
         state = state.copy(session = SessionLayerState.LivePreview)
         assertEquals(SessionLayerState.LivePreview, state.session)
 
-        // Transition 4: Cooldown countdown
-        state = state.copy(session = SessionLayerState.CoolingDown(60))
-        assertTrue(state.session is SessionLayerState.CoolingDown)
-        assertEquals(60, (state.session as SessionLayerState.CoolingDown).secondsRemaining)
+        // Transition 4: back to idle (no countdown: the session is kept, the Wi-Fi stays)
+        state = state.copy(session = SessionLayerState.Idle)
+        assertEquals(SessionLayerState.Idle, state.session)
 
         // Transition 5: Wi-Fi lost
         val lostTime = 1700000000000L

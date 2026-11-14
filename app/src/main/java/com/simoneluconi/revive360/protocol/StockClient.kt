@@ -32,10 +32,19 @@ data class StockMediaItem(
  */
 enum class StockQuery { X_GetSettingInformation, X_GetStorage }
 
-/** The live view's two actions, sent only inside a subscription, in this order, as tested on an SM-R210. */
-enum class StockSessionAction(val arguments: String) {
-    SetOperationState("<StateEvent>changeToRVF</StateEvent>"),
-    GetInfomation(""),
+/** The actions sent only inside a [StockClient.Session], each tested on an SM-R210 (docs/PLANO.md, section 13). */
+enum class StockSessionAction(val wire: String, val arguments: String) {
+    /** Live view mode */
+    ChangeToRVF("SetOperationState", "<StateEvent>changeToRVF</StateEvent>"),
+    GetInfomation("GetInfomation", ""),
+    /** Media List mode: the camera's files on port 7679 */
+    ChangeToML("SetOperationState", "<StateEvent>changeToML</StateEvent>"),
+    /** Container 8, all the media, one page of 100 */
+    BrowseAllMedia(
+        "Browse",
+        "<ObjectID>8</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>" +
+            "<Filter>*</Filter><StartingIndex>0</StartingIndex><RequestedCount>100</RequestedCount><SortCriteria></SortCriteria>",
+    ),
 }
 
 data class StockStatus(
@@ -67,47 +76,60 @@ class StockClient(
     }
 
     /**
-     * Active media session handle. Keeps ML mode alive while the user browses and downloads files.
-     * [close] sends UNSUBSCRIBE and blocks until it is answered or times out: call it off the main thread.
+     * The camera's event subscription, kept for as long as the app uses the camera: renewed before it
+     * lapses ([renew]) and **never ended with UNSUBSCRIBE**, which makes the SM-R210 turn its
+     * "Connect to iOS" Wi-Fi off within seconds (docs/PLANO.md, section 13, 2026-11-14). [close] only
+     * stops answering events; the camera lets the subscription lapse, and its Wi-Fi stays on.
      */
-    class MediaSession internal constructor(
-        val items: List<StockMediaItem>,
-        private val onClose: () -> Unit
-    ) : AutoCloseable {
+    inner class Session internal constructor(private val listener: ServerSocket, val sid: String) : AutoCloseable {
+        /** The last mode set in this session, so a mode is not set twice: that was never tested. */
+        @Volatile internal var cameraMode: StockSessionAction? = null
+
+        /** UPnP renewal: SUBSCRIBE with the SID and a new TIMEOUT, no CALLBACK or NT (tested, 2026-11-14). */
+        fun renew() {
+            val answer = event {
+                "SUBSCRIBE $EVENT_PATH HTTP/1.1\r\nHOST: $host:$eventPort\r\nUser-Agent: $STOCK_USER_AGENT\r\n" +
+                    "Access-Method: manual\r\nConnection: close\r\nSID: $sid\r\nTIMEOUT: $SUBSCRIBE_TIMEOUT\r\n\r\n"
+            }
+            if (!Regex("^HTTP/1\\.[01] 200").containsMatchIn(answer)) {
+                throw IOException("renewal: ${answer.lineSequence().firstOrNull().orEmpty()}")
+            }
+        }
+
         override fun close() {
-            onClose()
+            runCatching { listener.close() }
         }
     }
 
-    /**
-     * Opens a media session by switching to Media List mode (changeToML) and querying
-     * ContentDirectory:Browse on container 8 (AllMedia). The session must be kept open
-     * while downloading files, and closed when done.
-     */
-    fun openMediaSession(): MediaSession {
+    /** Subscribes to the camera's events. Nothing else: no mode is set. */
+    fun openSession(): Session {
         wake()
         val listener = ServerSocket(callbackPort)
         thread(name = "stock-events", isDaemon = true) { answerEvents(listener) }
-        var sid: String? = null
-        try {
-            sid = subscribe(listener.localPort)
-            Thread.sleep(settleMs)
-            post("SetOperationState", "<StateEvent>changeToML</StateEvent>")
-            Thread.sleep(settleMs)
-
-            val browseArgs = "<ObjectID>8</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag>" +
-                "<Filter>*</Filter><StartingIndex>0</StartingIndex><RequestedCount>100</RequestedCount><SortCriteria></SortCriteria>"
-            val answer = post("Browse", browseArgs)
-            val items = parseBrowseItems(answer)
-            val sessionSid = sid
-            val ended = AtomicBoolean(false)
-            return MediaSession(items) {
-                if (ended.compareAndSet(false, true)) end(sessionSid, listener)
-            }
+        return try {
+            Session(listener, subscribe(listener.localPort))
         } catch (e: Exception) {
-            end(sid, listener)
+            runCatching { listener.close() }
             throw e
         }
+    }
+
+    /** Sets [mode] once per session: the camera is told only when it is in another one. */
+    private fun ensureMode(session: Session, mode: StockSessionAction) {
+        if (session.cameraMode == mode) return
+        post(mode.wire, mode.arguments)
+        session.cameraMode = mode
+        Thread.sleep(settleMs)
+    }
+
+    /**
+     * The camera's files, in Media List mode (changeToML, then Browse of container 8). The mode stays
+     * set: listing again later only browses.
+     */
+    fun browseMedia(session: Session): List<StockMediaItem> {
+        ensureMode(session, StockSessionAction.ChangeToML)
+        val action = StockSessionAction.BrowseAllMedia
+        return parseBrowseItems(post(action.wire, action.arguments))
     }
 
     /**
@@ -186,50 +208,30 @@ class StockClient(
     }
 
     /**
-     * The live picture, by the official app's sequence as tested (docs/PLANO.md, section 13): SUBSCRIBE,
-     * changeToRVF, GetInfomation, then the stream. Never retried. Closing the stream ends the session
-     * with UNSUBSCRIBE, and the camera then stops answering for one to two minutes.
+     * The live picture, by the official app's sequence as tested (docs/PLANO.md, section 13):
+     * changeToRVF, GetInfomation, then the stream. Never retried. Closing the stream leaves the session
+     * as it is. Live view after the gallery in the same session was never tested.
      */
-    fun openLive(): LiveStream {
-        wake()
-        val listener = ServerSocket(callbackPort)
-        thread(name = "stock-events", isDaemon = true) { answerEvents(listener) }
-        var sid: String? = null
-        try {
-            sid = subscribe(listener.localPort)
-            for (action in StockSessionAction.entries) {
-                Thread.sleep(settleMs)
-                val answer = post(action.name, action.arguments)
-                if (action == StockSessionAction.GetInfomation && LIVE_PATH !in answer) {
-                    throw IOException("the camera offers no $LIVE_PATH")
-                }
-            }
-            Thread.sleep(settleMs)
-            val connection = connector.open(URL("http://$host:$LIVE_PORT$LIVE_PATH")).apply {
-                connectTimeout = TIMEOUT_MS
-                readTimeout = LIVE_READ_TIMEOUT_MS
-                setRequestProperty("User-Agent", LIVE_USER_AGENT)
-                setRequestProperty("Connection", "Keep-Alive")
-                setRequestProperty("Accept-Encoding", "identity")
-            }
-            val code = connection.responseCode
-            if (code != 200 && code != 206) {
-                connection.disconnect()
-                throw IOException("live view: HTTP $code")
-            }
-            val session = sid
-            val ended = AtomicBoolean(false)
-            return LiveStream(connection.contentType ?: "", connection.inputStream) {
-                if (ended.compareAndSet(false, true)) {
-                    thread(name = "stock-end", isDaemon = true) {
-                        connection.disconnect()
-                        end(session, listener)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            end(sid, listener)
-            throw e
+    fun openLive(session: Session): LiveStream {
+        ensureMode(session, StockSessionAction.ChangeToRVF)
+        val info = StockSessionAction.GetInfomation
+        if (LIVE_PATH !in post(info.wire, info.arguments)) throw IOException("the camera offers no $LIVE_PATH")
+        Thread.sleep(settleMs)
+        val connection = connector.open(URL("http://$host:$LIVE_PORT$LIVE_PATH")).apply {
+            connectTimeout = TIMEOUT_MS
+            readTimeout = LIVE_READ_TIMEOUT_MS
+            setRequestProperty("User-Agent", LIVE_USER_AGENT)
+            setRequestProperty("Connection", "Keep-Alive")
+            setRequestProperty("Accept-Encoding", "identity")
+        }
+        val code = connection.responseCode
+        if (code != 200 && code != 206) {
+            connection.disconnect()
+            throw IOException("live view: HTTP $code")
+        }
+        val ended = AtomicBoolean(false)
+        return LiveStream(connection.contentType ?: "", connection.inputStream) {
+            if (ended.compareAndSet(false, true)) thread(name = "stock-live-end", isDaemon = true) { connection.disconnect() }
         }
     }
 
@@ -244,19 +246,6 @@ class StockClient(
             throw IOException("SUBSCRIBE: ${answer.lineSequence().firstOrNull().orEmpty()}")
         }
         return Regex("(?im)^SID:\\s*(\\S+)").find(answer)?.groupValues?.get(1) ?: throw IOException("SUBSCRIBE: no SID")
-    }
-
-    /** UNSUBSCRIBE without waiting for an answer: the SM-R210 often closes the connection instead. */
-    private fun end(sid: String?, listener: ServerSocket) {
-        if (sid != null) {
-            runCatching {
-                event {
-                    "UNSUBSCRIBE $EVENT_PATH HTTP/1.1\r\nHOST: $host:$eventPort\r\nUser-Agent: $STOCK_USER_AGENT\r\n" +
-                        "Access-Method: manual\r\nConnection: close\r\nSID: $sid\r\n\r\n"
-                }
-            }
-        }
-        runCatching { listener.close() }
     }
 
     private fun event(request: (Socket) -> String): String = openSocket().use { socket ->
@@ -332,8 +321,10 @@ class StockClient(
         private const val EVENT_PATH = "/smp_5_"
         private const val CALLBACK_PORT = 8059
         private const val CALLBACK_PATH = "/evetSub"
-        /** Short: if UNSUBSCRIBE is lost, the subscription ends by itself. */
-        private const val SUBSCRIBE_TIMEOUT = "Second-300"
+        /** Accepted and renewed on the SM-R210; a lapse leaves its Wi-Fi on (2026-11-14) */
+        private const val SUBSCRIBE_TIMEOUT = "Second-120"
+        /** Renew this long after the last (re)subscription, well inside [SUBSCRIBE_TIMEOUT], as tested */
+        const val RENEW_EVERY_MS = 90_000L
         private const val EVENT_ANSWER = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         /** The pause between steps in the tested sequence */
         private const val SETTLE_MS = 3_000L
